@@ -195,6 +195,237 @@ else                           → "左へX度"
 - 「右へ30度、7メートル先」
 - 「左へ120度、15メートル先」
 
+## プログラム構造
+
+### アーキテクチャ概要
+Walk Guide 2 は Flutter のシンプルな MVC パターンを採用しています。画面（View）、ビジネスロジック（Engine）、データモデル（Model）、サービス層（Service）が明確に分離されています。
+
+### ファイル構成と役割
+
+```
+lib/
+├── main.dart                    # アプリエントリポイント
+├── walking_route.dart           # データモデル
+├── route_service.dart           # CSV読み込みサービス
+├── route_select_screen.dart     # ルート選択画面
+├── walk_navi_screen.dart        # ナビゲーション画面（View）
+├── walk_navi_engine.dart        # GPS追跡エンジン（Logic）
+└── route_map_screen.dart        # 地図表示画面
+```
+
+#### 1. main.dart
+- **役割**: アプリケーションのエントリポイント
+- **主要機能**:
+  - FlutterTts のグローバルインスタンス初期化
+  - MaterialApp の設定
+  - ホーム画面の表示
+- **依存**: なし
+- **公開**: `globalTts`（グローバル TTS インスタンス）
+
+#### 2. walking_route.dart
+- **役割**: ナビゲーション用データモデル
+- **主要クラス**:
+  - `NaviPoint`: 単一の地点情報（緯度、経度、メッセージ、トリガー距離）
+  - `WalkRoute`: ルート全体（名前、地点リスト）
+- **主要メソッド**:
+  - `NaviPoint.distanceTo(Position)`: 現在位置からの距離計算
+  - `NaviPoint.bearingTo(Position)`: 現在位置から地点への方位計算
+- **依存**: `geolocator`
+
+#### 3. route_service.dart
+- **役割**: CSV ファイルからルートデータを読み込むサービス層
+- **主要クラス**: `RouteService`
+- **主要メソッド**:
+  - `static Future<List<WalkRoute>> loadRoutes()`: 全ルートを読み込み
+  - `static Future<WalkRoute?> _loadRoute(String)`: 個別ルートファイルを読み込み
+- **依存**: `csv`, `flutter/services`, `walking_route`
+- **データソース**: `assets/routes/*.csv`
+
+#### 4. route_select_screen.dart
+- **役割**: ルート選択画面（リスト表示）
+- **主要機能**:
+  - ルートリストの表示（名前、地点数、総距離）
+  - ルート選択時にナビゲーション画面へ遷移
+- **依存**: `route_service`, `walk_navi_screen`, `walking_route`
+- **状態管理**: StatefulWidget（ルートリスト読み込み）
+
+#### 5. walk_navi_screen.dart
+- **役割**: ナビゲーション画面（メイン UI）
+- **主要機能**:
+  - リアルタイム位置・方位表示
+  - コンパス表示（相対方向）
+  - 小型磁北コンパス表示（介助者用）
+  - 音声案内タイマー（15秒間隔）
+  - 地図画面への遷移
+- **状態管理**: StatefulWidget
+- **ライフサイクル**:
+  - `initState()`: エンジン初期化、コンパス監視開始、音声タイマー開始
+  - `deactivate()`: 音声タイマー停止（画面離脱時）
+  - `dispose()`: リソース解放
+- **依存**: `walk_navi_engine`, `route_map_screen`, `flutter_compass`
+
+#### 6. walk_navi_engine.dart
+- **役割**: GPS 追跡とナビゲーションロジック
+- **主要クラス**: `WalkNaviEngine`
+- **主要機能**:
+  - GPS 位置監視（1m 間隔、高精度）
+  - 現在位置と次の地点の距離・方位計算
+  - 地点到達検出（トリガー距離以内）
+  - 地点到達時の音声案内
+- **主要メソッド**:
+  - `start()`: GPS 監視開始
+  - `stop()`: GPS 監視停止
+  - `_onPositionUpdate(Position)`: 位置更新時の処理
+  - `_announcePoint(NaviPoint)`: 地点到達時の音声案内
+- **コールバック**: `onLocationUpdate(Position)`, `onPointReached(int)`
+- **依存**: `geolocator`, `walking_route`, `main.globalTts`
+
+#### 7. route_map_screen.dart
+- **役割**: Google Maps による地図表示画面
+- **主要機能**:
+  - ルート全体をポリラインで表示
+  - 各地点にマーカー配置（色分け）
+  - 現在位置のリアルタイム更新
+  - カメラ操作（現在位置、ルート全体表示）
+- **状態管理**: StatefulWidget
+- **依存**: `google_maps_flutter`, `walking_route`, `walk_navi_engine`
+
+### データフロー図
+
+```
+[CSV Files] 
+    ↓ (RouteService)
+[WalkRoute Models]
+    ↓ (RouteSelectScreen)
+[User Selection]
+    ↓
+[WalkNaviScreen] ←→ [WalkNaviEngine] ←→ [GPS Sensor]
+    ↓                     ↓
+[UI Update]        [Position Calculation]
+    ↓                     ↓
+[Voice Guidance]   [Point Detection]
+    ↓
+[globalTts]
+
+[WalkNaviScreen] ←→ [FlutterCompass]
+    ↓
+[Compass UI]
+
+[WalkNaviScreen] → [RouteMapScreen]
+                        ↓
+                    [Google Maps]
+```
+
+### 主要クラスの責務
+
+| クラス | 責務 | 状態 |
+|--------|------|------|
+| `WalkRoute` | ルートデータの保持 | イミ ュータブル |
+| `NaviPoint` | 地点データと計算ロジック | イミュータブル |
+| `RouteService` | CSV読み込み | ステートレス |
+| `RouteSelectScreen` | ルート選択 UI | ステートフル |
+| `WalkNaviScreen` | ナビ UI とタイマー管理 | ステートフル |
+| `WalkNaviEngine` | GPS 監視とナビロジック | ステートフル |
+| `RouteMapScreen` | 地図 UI | ステートフル |
+
+### 画面遷移フロー
+
+```
+[HomeScreen (main.dart)]
+    ↓ ElevatedButton("ルート選択")
+[RouteSelectScreen]
+    ↓ ListView.builder → onTap(route)
+[WalkNaviScreen]
+    ├→ IconButton("地図") → [RouteMapScreen]
+    │                           ↓ AppBar Back
+    │                        [WalkNaviScreen]
+    └→ IconButton("停止") → showDialog
+                               ↓ "はい"
+                          Navigator.popUntil
+                               ↓
+                          [HomeScreen]
+```
+
+### 依存関係図
+
+```
+main.dart
+    ↓ (provides globalTts)
+    ├→ route_select_screen.dart
+    │       ↓
+    │   route_service.dart → walking_route.dart
+    │       ↓
+    │   walk_navi_screen.dart
+    │       ├→ walk_navi_engine.dart → walking_route.dart
+    │       └→ route_map_screen.dart → walking_route.dart
+    │
+    └→ (uses globalTts)
+        walk_navi_engine.dart
+```
+
+### センサー統合
+
+#### GPS (geolocator)
+- **設定**: `LocationSettings`
+  - accuracy: `LocationAccuracy.bestForNavigation`
+  - distanceFilter: 1m
+- **ストリーム**: `Geolocator.getPositionStream()`
+- **使用箇所**: `WalkNaviEngine._onPositionUpdate()`
+
+#### コンパス (flutter_compass)
+- **ストリーム**: `FlutterCompass.events`
+- **データ**: `heading` (0-360度、磁北基準)
+- **使用箇所**: `WalkNaviScreen._deviceHeading`
+- **注意**: デバイス依存性あり、センサー未搭載の場合0度固定
+
+#### TTS (flutter_tts)
+- **初期化**: `main.dart` でグローバルインスタンス作成
+- **設定**: 日本語 (`setLanguage("ja-JP")`)
+- **使用箇所**:
+  - `WalkNaviEngine._announcePoint()`: 地点到達時
+  - `WalkNaviScreen._speakDirection()`: 定期音声案内
+
+### 拡張ポイント（ルート編集機能追加用）
+
+以下の箇所が拡張対象となります：
+
+#### 1. ルート保存機能
+- **追加ファイル**: `lib/route_save_service.dart`
+- **機能**: `WalkRoute` オブジェクトを CSV 形式で保存
+- **保存先**: `getApplicationDocumentsDirectory()` 配下
+- **既存コードへの影響**: なし（RouteService と並列）
+
+#### 2. ルート編集画面
+- **追加ファイル**: `lib/route_edit_screen.dart`
+- **機能**:
+  - 既存ルートの地点追加・削除・並び替え
+  - 地点の緯度・経度・メッセージ編集
+  - 地図上でのタップによる地点追加
+- **遷移元**: `RouteSelectScreen`（編集ボタン追加）
+- **依存**: `route_map_screen.dart` の地図ロジック再利用可能
+
+#### 3. ルート録画機能
+- **追加ファイル**: `lib/route_record_screen.dart`
+- **機能**:
+  - GPS 位置を一定間隔で記録
+  - 手動で地点追加（メッセージ入力）
+  - 録画停止後にルートとして保存
+- **既存ロジック再利用**: `WalkNaviEngine` の GPS 監視ロジック参考
+
+#### 4. データモデル拡張
+- **ファイル**: `walking_route.dart`
+- **追加メソッド**:
+  - `WalkRoute.toCSV()`: CSV 文字列に変換
+  - `WalkRoute.copyWith()`: イミュータブル更新用
+  - `NaviPoint.copyWith()`: イミュータブル更新用
+
+#### 5. RouteService の拡張
+- **ファイル**: `route_service.dart`
+- **追加メソッド**:
+  - `loadCustomRoutes()`: ユーザー作成ルートを読み込み
+  - `deleteRoute(String)`: ルート削除
+- **データソース**: アセットとドキュメントディレクトリの統合
+
 ## 権限要件
 
 ### Android（AndroidManifest.xml）
