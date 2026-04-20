@@ -50,6 +50,30 @@ class NaviPoint {
       longitude,
     );
   }
+
+  /// イミュータブル更新用のcopyWith
+  NaviPoint copyWith({
+    int? no,
+    double? latitude,
+    double? longitude,
+    double? heading,
+    double? triggerDistance,
+    String? message,
+  }) {
+    return NaviPoint(
+      no: no ?? this.no,
+      latitude: latitude ?? this.latitude,
+      longitude: longitude ?? this.longitude,
+      heading: heading ?? this.heading,
+      triggerDistance: triggerDistance ?? this.triggerDistance,
+      message: message ?? this.message,
+    );
+  }
+
+  /// CSV形式の文字列に変換
+  String toCsvRow() {
+    return '$no,$latitude,$longitude,$heading,$triggerDistance,$message';
+  }
 }
 
 /// 歩行ルート（地点の集合）
@@ -58,4 +82,40 @@ class WalkRoute {
   final List<NaviPoint> points;
 
   WalkRoute({required this.name, required this.points});
+
+  /// イミュータブル更新用のcopyWith
+  WalkRoute copyWith({
+    String? name,
+    List<NaviPoint>? points,
+  }) {
+    return WalkRoute(
+      name: name ?? this.name,
+      points: points ?? this.points,
+    );
+  }
+
+  /// CSV形式の文字列に変換
+  String toCsv() {
+    final buffer = StringBuffer();
+    buffer.writeln('地点番号,緯度,経度,方位,トリガー距離,メッセージ');
+    for (final point in points) {
+      buffer.writeln(point.toCsvRow());
+    }
+    return buffer.toString();
+  }
+
+  /// 総距離を計算（メートル）
+  double getTotalDistance() {
+    if (points.length < 2) return 0.0;
+    double total = 0.0;
+    for (int i = 0; i < points.length - 1; i++) {
+      total += Geolocator.distanceBetween(
+        points[i].latitude,
+        points[i].longitude,
+        points[i + 1].latitude,
+        points[i + 1].longitude,
+      );
+    }
+    return total;
+  }
 }

@@ -19,6 +19,10 @@ dependencies:
   shared_preferences: 2.2.2    # 設定保存
   flutter_compass: ^0.8.0      # 方位センサー
   google_maps_flutter: ^2.2.0  # 地図表示
+  camera: ^0.10.5              # カメラ撮影
+  speech_to_text: ^7.0.0       # 音声認識
+  http: ^1.2.0                 # API通信
+  flutter_dotenv: ^5.1.0       # 環境変数管理
 
 dev_dependencies:
   flutter_test:
@@ -43,6 +47,7 @@ flutter:
     - assets/routes/home_route.csv
     - assets/routes/friend_home.csv
     - assets/routes/express_bus_stop.csv
+    - .walking_guide.env
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'route_service.dart';
 import 'walk_navi_screen.dart';
+import 'route_edit_screen.dart';
 
 /// ルート選択画面
 class RouteSelectScreen extends StatefulWidget {
@@ -52,7 +53,7 @@ class _RouteSelectScreenState extends State<RouteSelectScreen> {
 
   Future<void> _selectRoute(RouteInfo routeInfo) async {
     try {
-      final route = await RouteService.loadRoute(routeInfo.fileName);
+      final route = await RouteService.loadRoute(routeInfo.fileName, isCustom: routeInfo.isCustom);
       await widget.tts.speak('${routeInfo.displayName}を読み込みました。ナビゲーションを開始します。');
 
       if (mounted) {
@@ -71,6 +72,89 @@ class _RouteSelectScreenState extends State<RouteSelectScreen> {
     }
   }
 
+  /// ルート編集画面を開く
+  Future<void> _editRoute(RouteInfo routeInfo) async {
+    try {
+      final route = await RouteService.loadRoute(routeInfo.fileName, isCustom: routeInfo.isCustom);
+      
+      if (mounted) {
+        final result = await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => RouteEditScreen(
+              initialRoute: route,
+              isNewRoute: false,
+            ),
+          ),
+        );
+
+        // 保存された場合はリロード
+        if (result == true) {
+          _loadRoutes();
+        }
+      }
+    } catch (e) {
+      _showError('ルートの読み込みに失敗しました: $e');
+    }
+  }
+
+  /// 新規ルート作成画面を開く
+  Future<void> _createNewRoute() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const RouteEditScreen(
+          isNewRoute: true,
+        ),
+      ),
+    );
+
+    // 保存された場合はリロード
+    if (result == true) {
+      _loadRoutes();
+    }
+  }
+
+  /// ルート削除確認
+  Future<void> _deleteRoute(RouteInfo routeInfo) async {
+    if (!routeInfo.isCustom) {
+      _showError('組み込みルートは削除できません');
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('ルート削除'),
+        content: Text('「${routeInfo.displayName}」を削除しますか？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('キャンセル'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('削除', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        await RouteService.deleteRoute(routeInfo.fileName);
+        _loadRoutes();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('ルートを削除しました')),
+          );
+        }
+      } catch (e) {
+        _showError('削除に失敗しました: $e');
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -86,16 +170,34 @@ class _RouteSelectScreenState extends State<RouteSelectScreen> {
         ),
         backgroundColor: Colors.black,
         iconTheme: const IconThemeData(color: Colors.white),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.add, size: 32),
+            onPressed: _createNewRoute,
+            tooltip: '新規ルート作成',
+          ),
+        ],
       ),
       body: _isLoading
           ? const Center(
               child: CircularProgressIndicator(color: Colors.white),
             )
           : _routes.isEmpty
-              ? const Center(
-                  child: Text(
-                    'ルートが見つかりません',
-                    style: TextStyle(color: Colors.white, fontSize: 24),
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Text(
+                        'ルートが見つかりません',
+                        style: TextStyle(color: Colors.white, fontSize: 24),
+                      ),
+                      const SizedBox(height: 20),
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.add),
+                        label: const Text('新規ルート作成'),
+                        onPressed: _createNewRoute,
+                      ),
+                    ],
                   ),
                 )
               : ListView.builder(
@@ -113,13 +215,37 @@ class _RouteSelectScreenState extends State<RouteSelectScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                route.displayName,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 28,
-                                  fontWeight: FontWeight.bold,
-                                ),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      route.displayName,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 28,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                  if (route.isCustom)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.blue[700],
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: const Text(
+                                        'カスタム',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
                               const SizedBox(height: 8),
                               Text(
@@ -133,6 +259,19 @@ class _RouteSelectScreenState extends State<RouteSelectScreen> {
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.end,
                                 children: [
+                                  if (route.isCustom) ...[
+                                    IconButton(
+                                      icon: const Icon(Icons.edit, color: Colors.white),
+                                      onPressed: () => _editRoute(route),
+                                      tooltip: '編集',
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(Icons.delete, color: Colors.red),
+                                      onPressed: () => _deleteRoute(route),
+                                      tooltip: '削除',
+                                    ),
+                                    const SizedBox(width: 8),
+                                  ],
                                   Icon(
                                     Icons.arrow_forward,
                                     color: Colors.blue[300],
