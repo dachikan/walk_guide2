@@ -484,56 +484,26 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        title: Text(
-          widget.route.name,
-          style: const TextStyle(
-            fontSize: 28,
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-          ),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        toolbarHeight: 70, // AppBarの高さを増やす
+        toolbarHeight: 56, // 標準の高さ
         backgroundColor: Colors.grey[900],
         iconTheme: const IconThemeData(color: Colors.white, size: 20),
         actions: [
-          // ステータスインジケータ
+          // ステータスインジケータ（コンパクトに）
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            margin: const EdgeInsets.only(right: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            margin: const EdgeInsets.only(right: 4),
             decoration: BoxDecoration(
               color: _currentState == NaviState.navigating
                   ? Colors.green[700]
                   : Colors.grey[700],
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: _currentState == NaviState.navigating
-                    ? Colors.green[400]!
-                    : Colors.grey[500]!,
-                width: 1,
-              ),
+              borderRadius: BorderRadius.circular(8),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  _currentState == NaviState.navigating
-                      ? Icons.navigation
-                      : Icons.pause_circle,
-                  size: 14,
-                  color: Colors.white,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  _getStateText(),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
+            child: Icon(
+              _currentState == NaviState.navigating
+                  ? Icons.navigation
+                  : Icons.pause_circle,
+              size: 20,
+              color: Colors.white,
             ),
           ),
           // 地図ボタン（大きく分かりやすく）
@@ -575,6 +545,27 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
       ),
       body: Column(
         children: [
+          // ルート名表示エリア（専用の行）
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: Colors.grey[850],
+              border: Border(
+                bottom: BorderSide(color: Colors.grey[700]!, width: 1),
+              ),
+            ),
+            child: Text(
+              widget.route.name,
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
           // 介助者用情報エリア（上半分）
           Expanded(
             flex: 5,
