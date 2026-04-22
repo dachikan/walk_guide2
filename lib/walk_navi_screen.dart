@@ -484,62 +484,27 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        toolbarHeight: 56, // 標準の高さ
+        title: Text(
+          'V${widget.route.points.length}.1.0+1',
+          style: const TextStyle(
+            fontSize: 16,
+            color: Colors.white70,
+          ),
+        ),
+        toolbarHeight: 56,
         backgroundColor: Colors.grey[900],
         iconTheme: const IconThemeData(color: Colors.white, size: 20),
         actions: [
-          // ステータスインジケータ（コンパクトに）
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-            margin: const EdgeInsets.only(right: 4),
-            decoration: BoxDecoration(
-              color: _currentState == NaviState.navigating
-                  ? Colors.green[700]
-                  : Colors.grey[700],
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(
-              _currentState == NaviState.navigating
-                  ? Icons.navigation
-                  : Icons.pause_circle,
-              size: 20,
-              color: Colors.white,
-            ),
-          ),
-          // 地図ボタン（大きく分かりやすく）
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.blue[700],
-              borderRadius: BorderRadius.circular(8),
-            ),
-            margin: const EdgeInsets.only(right: 4),
-            child: IconButton(
-              icon: const Icon(Icons.map, size: 32, color: Colors.white),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => RouteMapScreen(route: widget.route),
-                  ),
-                );
-              },
-              tooltip: '地図',
-              padding: const EdgeInsets.all(8),
-            ),
-          ),
-          // 停止ボタン（大きく分かりやすく）
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.red[700],
-              borderRadius: BorderRadius.circular(8),
-            ),
-            margin: const EdgeInsets.only(right: 8),
-            child: IconButton(
-              icon: const Icon(Icons.stop_circle, size: 32, color: Colors.white),
-              onPressed: _stopNavigation,
-              tooltip: '終了',
-              padding: const EdgeInsets.all(8),
-            ),
+          // 設定ボタン
+          IconButton(
+            icon: const Icon(Icons.settings, size: 28),
+            onPressed: () {
+              // TODO: 設定画面を実装
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('設定機能は準備中です')),
+              );
+            },
+            tooltip: '設定',
           ),
         ],
       ),
@@ -548,55 +513,180 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
           // ルート名表示エリア（専用の行）
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
-              color: Colors.grey[850],
+              color: Colors.white,
               border: Border(
-                bottom: BorderSide(color: Colors.grey[700]!, width: 1),
+                bottom: BorderSide(color: Colors.grey[400]!, width: 1),
               ),
             ),
-            child: Text(
-              widget.route.name,
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
+            child: Row(
+              children: [
+                const Text(
+                  'ルート名：',
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: Colors.black87,
+                  ),
+                ),
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(color: Colors.grey[400]!, width: 1, style: BorderStyle.solid),
+                      ),
+                    ),
+                    child: Text(
+                      widget.route.name,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        color: Colors.black87,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // ボタン行（ナビ中、地図編集、ナビ中止）
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border(
+                bottom: BorderSide(color: Colors.grey[400]!, width: 1),
               ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                // ナビ中ステータス
+                Expanded(
+                  child: Container(
+                    height: 50,
+                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                    decoration: BoxDecoration(
+                      color: _currentState == NaviState.navigating
+                          ? Colors.green[100]
+                          : Colors.grey[300],
+                      border: Border.all(
+                        color: _currentState == NaviState.navigating
+                            ? Colors.green[700]!
+                            : Colors.grey[600]!,
+                        width: 2,
+                      ),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Center(
+                      child: Text(
+                        _getStateText(),
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                // 地図編集ボタン
+                Expanded(
+                  child: Container(
+                    height: 50,
+                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                    child: OutlinedButton(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => RouteMapScreen(route: widget.route),
+                          ),
+                        );
+                      },
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: Colors.blue[700]!, width: 2),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: const Text(
+                        '地図編集',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                // ナビ中止ボタン
+                Expanded(
+                  child: Container(
+                    height: 50,
+                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                    child: OutlinedButton(
+                      onPressed: _stopNavigation,
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: Colors.cyan[700]!, width: 2),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: const Text(
+                        'ナビ中止',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
           // 介助者用情報エリア（上半分）
           Expanded(
             flex: 5,
             child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.grey[900]!, Colors.grey[850]!],
-                ),
-              ),
+              color: Colors.white,
               child: Column(
                 children: [
-                  // セクション1: ナビゲーション情報
+                  // セクション1: ナビゲーション情報（コメント欄）
                   Expanded(
                     flex: 3,
                     child: Container(
                       margin: const EdgeInsets.all(8),
+                      padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.grey[800]!.withOpacity(0.5),
+                        color: Colors.white,
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.grey[700]!, width: 1),
+                        border: Border.all(color: Colors.green[700]!, width: 2),
                       ),
-                      child: Row(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // コンパス表示
+                          const Text(
+                            'コメント',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black87,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
                           Expanded(
-                            flex: 2,
-                            child: Container(
-                              padding: const EdgeInsets.all(8),
-                              child: Stack(
+                            child: Row(
+                              children: [
+                                // コンパス表示
+                                Expanded(
+                                  flex: 2,
+                                  child: Stack(
                                 children: [
                                   Center(
                                     child: Column(
@@ -605,7 +695,7 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
                                         Container(
                                           padding: const EdgeInsets.all(12),
                                           decoration: BoxDecoration(
-                                            color: Colors.blue[900]!.withOpacity(0.3),
+                                            color: Colors.blue[100],
                                             shape: BoxShape.circle,
                                           ),
                                           child: Transform.rotate(
@@ -613,15 +703,22 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
                                             child: Icon(
                                               Icons.navigation,
                                               size: 60,
-                                              color: Colors.blue[300],
+                                              color: Colors.blue[700],
                                             ),
                                           ),
                                         ),
                                         const SizedBox(height: 8),
+                                        const Text(
+                                          '方向',
+                                          style: TextStyle(
+                                            color: Colors.black87,
+                                            fontSize: 14,
+                                          ),
+                                        ),
                                         Text(
                                           _getDirectionText(),
                                           style: const TextStyle(
-                                            color: Colors.white,
+                                            color: Colors.black,
                                             fontSize: 20,
                                             fontWeight: FontWeight.bold,
                                           ),
@@ -681,39 +778,24 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
                                 border: Border(
-                                  left: BorderSide(color: Colors.grey[700]!, width: 1),
+                                  left: BorderSide(color: Colors.grey[400]!, width: 1),
                                 ),
                               ),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Row(
-                                    children: [
-                                      Icon(Icons.place, size: 16, color: Colors.blue[300]),
-                                      const SizedBox(width: 6),
-                                      const Text(
-                                        '次の地点',
-                                        style: TextStyle(
-                                          color: Colors.grey,
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 6),
                                   Text(
                                     _nextPoint?.message ?? '地点情報なし',
                                     style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 18,
+                                      color: Colors.black87,
+                                      fontSize: 16,
                                       fontWeight: FontWeight.bold,
                                     ),
                                     maxLines: 2,
                                     overflow: TextOverflow.ellipsis,
                                   ),
-                                  const SizedBox(height: 10),
+                                  const SizedBox(height: 12),
                                   Row(
                                     children: [
                                       // 距離カード
@@ -721,21 +803,21 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
                                         child: Container(
                                           padding: const EdgeInsets.all(8),
                                           decoration: BoxDecoration(
-                                            color: Colors.blue[900]!.withOpacity(0.3),
+                                            color: Colors.blue[50],
                                             borderRadius: BorderRadius.circular(8),
-                                            border: Border.all(color: Colors.blue[700]!, width: 1),
+                                            border: Border.all(color: Colors.blue[300]!, width: 1),
                                           ),
                                           child: Column(
                                             children: [
                                               Row(
                                                 mainAxisAlignment: MainAxisAlignment.center,
                                                 children: [
-                                                  Icon(Icons.straighten, size: 12, color: Colors.grey[400]),
+                                                  Icon(Icons.straighten, size: 12, color: Colors.blue[700]),
                                                   const SizedBox(width: 4),
                                                   Text(
                                                     '距離',
                                                     style: TextStyle(
-                                                      color: Colors.grey[400],
+                                                      color: Colors.blue[700],
                                                       fontSize: 10,
                                                     ),
                                                   ),
@@ -745,7 +827,7 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
                                               Text(
                                                 '${_distanceToNext?.round() ?? '--'} m',
                                                 style: TextStyle(
-                                                  color: Colors.blue[300],
+                                                  color: Colors.blue[900],
                                                   fontSize: 16,
                                                   fontWeight: FontWeight.bold,
                                                 ),
@@ -760,21 +842,21 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
                                         child: Container(
                                           padding: const EdgeInsets.all(8),
                                           decoration: BoxDecoration(
-                                            color: Colors.green[900]!.withOpacity(0.3),
+                                            color: Colors.green[50],
                                             borderRadius: BorderRadius.circular(8),
-                                            border: Border.all(color: Colors.green[700]!, width: 1),
+                                            border: Border.all(color: Colors.green[300]!, width: 1),
                                           ),
                                           child: Column(
                                             children: [
                                               Row(
                                                 mainAxisAlignment: MainAxisAlignment.center,
                                                 children: [
-                                                  Icon(Icons.flag, size: 12, color: Colors.grey[400]),
+                                                  Icon(Icons.flag, size: 12, color: Colors.green[700]),
                                                   const SizedBox(width: 4),
                                                   Text(
                                                     '進捗',
                                                     style: TextStyle(
-                                                      color: Colors.grey[400],
+                                                      color: Colors.green[700],
                                                       fontSize: 10,
                                                     ),
                                                   ),
@@ -783,8 +865,8 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
                                               const SizedBox(height: 2),
                                               Text(
                                                 '${_nextPoint?.no ?? '--'}/${widget.route.points.length}',
-                                                style: const TextStyle(
-                                                  color: Colors.white,
+                                                style: TextStyle(
+                                                  color: Colors.green[900],
                                                   fontSize: 16,
                                                   fontWeight: FontWeight.bold,
                                                 ),
@@ -805,19 +887,19 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
                   ),
                   // セクション2: 位置情報
                   Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    margin: const EdgeInsets.only(left: 8, right: 8, bottom: 8, top: 4),
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
-                      color: Colors.grey[800]!.withOpacity(0.5),
+                      color: Colors.grey[100],
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.grey[700]!, width: 1),
+                      border: Border.all(color: Colors.grey[400]!, width: 1),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
                       children: [
                         Row(
                           children: [
-                            Icon(Icons.my_location, size: 14, color: Colors.green[400]),
+                            Icon(Icons.my_location, size: 14, color: Colors.green[700]),
                             const SizedBox(width: 6),
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -825,14 +907,14 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
                                 Text(
                                   '緯度',
                                   style: TextStyle(
-                                    color: Colors.grey[500],
+                                    color: Colors.grey[700],
                                     fontSize: 9,
                                   ),
                                 ),
                                 Text(
                                   _currentPosition?.latitude.toStringAsFixed(5) ?? '--',
                                   style: const TextStyle(
-                                    color: Colors.white,
+                                    color: Colors.black87,
                                     fontSize: 13,
                                     fontWeight: FontWeight.bold,
                                     fontFamily: 'monospace',
@@ -845,11 +927,11 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
                         Container(
                           width: 1,
                           height: 30,
-                          color: Colors.grey[700],
+                          color: Colors.grey[400],
                         ),
                         Row(
                           children: [
-                            Icon(Icons.my_location, size: 14, color: Colors.green[400]),
+                            Icon(Icons.my_location, size: 14, color: Colors.green[700]),
                             const SizedBox(width: 6),
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -857,14 +939,14 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
                                 Text(
                                   '経度',
                                   style: TextStyle(
-                                    color: Colors.grey[500],
+                                    color: Colors.grey[700],
                                     fontSize: 9,
                                   ),
                                 ),
                                 Text(
                                   _currentPosition?.longitude.toStringAsFixed(5) ?? '--',
                                   style: const TextStyle(
-                                    color: Colors.white,
+                                    color: Colors.black87,
                                     fontSize: 13,
                                     fontWeight: FontWeight.bold,
                                     fontFamily: 'monospace',
@@ -879,16 +961,6 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
                   ),
                   const SizedBox(height: 4),
                 ],
-              ),
-            ),
-          ),
-
-          // 区切り線
-          Container(
-            height: 2,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [Colors.transparent, Colors.grey[700]!, Colors.transparent],
               ),
             ),
           ),
@@ -928,12 +1000,13 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
                             ),
                             const SizedBox(height: 20),
                             Text(
-                              _isListening ? '聞いています...' : '音声命令',
+                              _isListening ? '聞いています...' : '音声命令ボタン',
                               style: const TextStyle(
                                 color: Colors.white,
-                                fontSize: 32,
+                                fontSize: 28,
                                 fontWeight: FontWeight.bold,
                               ),
+                              textAlign: TextAlign.center,
                             ),
                             const SizedBox(height: 12),
                             const Text(
@@ -975,12 +1048,13 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
                             ),
                             const SizedBox(height: 20),
                             Text(
-                              _isCameraProcessing ? '分析中...' : '前方確認',
+                              _isCameraProcessing ? '分析中...' : '撮影ボタン',
                               style: const TextStyle(
                                 color: Colors.white,
-                                fontSize: 32,
+                                fontSize: 28,
                                 fontWeight: FontWeight.bold,
                               ),
+                              textAlign: TextAlign.center,
                             ),
                             const SizedBox(height: 12),
                             const Text(
