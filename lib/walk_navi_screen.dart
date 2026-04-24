@@ -10,6 +10,9 @@ import 'walking_route.dart';
 import 'walk_navi_engine.dart';
 import 'route_map_screen.dart';
 import 'ai_service.dart';
+import 'radar_view.dart';
+import 'arrow_3d_view.dart';
+import 'common_header.dart';
 
 /// ナビゲーション画面
 class WalkNaviScreen extends StatefulWidget {
@@ -40,6 +43,20 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
   
   // 音声ナビ用タイマー
   Timer? _voiceNaviTimer;
+  
+  // GPS状態デバッグ用
+  String _gpsStatus = '初期化中...';
+  LocationPermission? _locationPermission;
+  int _positionUpdateCount = 0; // 位置更新回数
+  DateTime? _lastPositionUpdateTime; // 最終更新時刻
+  
+  // 表示モード切り替え (true=3D矢印, false=レーダー)
+  bool _show3DArrow = true;
+  
+  // パフォーマンス対策
+  bool _isDisposed = false; // 破棄済みフラグ
+  DateTime? _lastSetStateTime; // 最終setState時刻
+  static const _minSetStateInterval = Duration(milliseconds: 500); // setState最小間隔
 
   // 障害者支援機能
   CameraController? _cameraController;
@@ -54,35 +71,62 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
     super.initState();
     _initializeEngine();
     _startPositionTracking();
-    _initializeCamera();
+    // カメラ初期化を遅延（メモリ節約）
+    Future.delayed(const Duration(seconds: 2), () {
+      if (!_isDisposed) _initializeCamera();
+    });
     _initializeSpeech();
   }
 
-  /// カメラ初期化
+  /// カメラ初期化（遅延）
   Future<void> _initializeCamera() async {
+    if (_isDisposed) return;
     try {
       final cameras = await availableCameras();
-      if (cameras.isEmpty) return;
+      if (cameras.isEmpty || _isDisposed) return;
 
       _cameraController = CameraController(
         cameras.first,
         ResolutionPreset.medium,
+        enableAudio: false, // 音声不要
       );
-      await _cameraController!.initialize();
+      if (!_isDisposed) {
+        await _cameraController!.initialize();
+      }
     } catch (e) {
-      print('カメラ初期化エラー: $e');
+      if (!_isDisposed) {
+        debugPrint('カメラ初期化エラー: $e');
+      }
     }
   }
 
   /// 音声認識初期化
   Future<void> _initializeSpeech() async {
+    if (_isDisposed) return;
     try {
       await _speechToText.initialize(
-        onError: (error) => print('音声認識エラー: $error'),
+        onError: (error) => debugPrint('音声認識エラー: $error'),
       );
     } catch (e) {
-      print('音声認識初期化エラー: $e');
+      if (!_isDisposed) {
+        debugPrint('音声認識初期化エラー: $e');
+      }
     }
+  }
+  
+  /// setState の最適化版（過剰な更新を防止）
+  void _safeSetState(VoidCallback fn) {
+    if (_isDisposed || !mounted) return;
+    
+    final now = DateTime.now();
+    if (_lastSetStateTime != null &&
+        now.difference(_lastSetStateTime!) < _minSetStateInterval) {
+      // 更新が頻繁すぎる場合はスキップ
+      return;
+    }
+    
+    _lastSetStateTime = now;
+    setState(fn);
   }
 
   void _initializeEngine() {
@@ -102,38 +146,170 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
 
   Future<void> _startPositionTracking() async {
     try {
+      print('=== GPS初期化開始 ===');
+      
+      // GPS有効化チェック
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      print('📡 位置情報サービス: ${serviceEnabled ? "有効" : "無効"}');
+      
+      if (!serviceEnabled) {
+        setState(() {
+          _gpsStatus = 'GPS無効: 設定でGPSを有効にしてください';
+        });
+        await widget.tts.speak('GPSが無効です。設定で有効にしてください。');
+        _showError('GPSが無効です。設定から位置情報サービスを有効にしてください。');
+        print('❌ GPSサービスが無効です');
+        return;
+      }
+
+      // 権限チェック
+      _locationPermission = await Geolocator.checkPermission();
+      print('🔐 位置情報権限: $_locationPermission');
+      
+      if (_locationPermission == LocationPermission.denied) {
+        print('⚠️ 権限が拒否されています。権限をリクエストします...');
+        _locationPermission = await Geolocator.requestPermission();
+        print('🔐 権限リクエスト結果: $_locationPermission');
+        
+        if (_locationPermission == LocationPermission.denied) {
+          setState(() {
+            _gpsStatus = '権限拒否: 位置情報の権限を許可してください';
+          });
+          await widget.tts.speak('位置情報の権限が必要です。');
+          _showError('位置情報の権限が拒否されました。');
+          print('❌ 権限が拒否されました');
+          return;
+        }
+      }
+
+      if (_locationPermission == LocationPermission.deniedForever) {
+        setState(() {
+          _gpsStatus = '権限永久拒否: 設定から権限を許可してください';
+        });
+        await widget.tts.speak('設定から位置情報の権限を許可してください。');
+        _showError('位置情報の権限が永久に拒否されています。設定から許可してください。');
+        print('❌ 権限が永久拒否されています');
+        return;
+      }
+
+      setState(() {
+        _gpsStatus = 'GPS情報取得中... (最大15秒待機)';
+      });
+      print('🔍 位置情報取得を開始します...');
+
+      // 最初の位置を取得（タイムアウト付き）
+      try {
+        debugPrint('=== GPS初期位置取得開始 ===');
+        
+        // メインスレッドをブロックしないように少し待機
+        await Future.delayed(const Duration(milliseconds: 500));
+        
+        final initialPosition = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+          timeLimit: const Duration(seconds: 15),
+        ).timeout(
+          const Duration(seconds: 20),
+          onTimeout: () {
+            debugPrint('⏱️ GPS取得がタイムアウトしました（20秒）');
+            throw TimeoutException('GPS信号受信タイムアウト');
+          },
+        );
+        
+        _safeSetState(() {
+          _currentPosition = initialPosition;
+          _positionUpdateCount = 1;
+          _lastPositionUpdateTime = DateTime.now();
+          _gpsStatus = 'GPS取得成功 (精度: ${initialPosition.accuracy.toStringAsFixed(1)}m)';
+          _updateNextPoint();
+        });
+        debugPrint('✅ 初期位置: ${initialPosition.latitude}, ${initialPosition.longitude} (精度: ${initialPosition.accuracy}m)');
+        
+        // GPS取得成功後にナビゲーションエンジンを開始
+        await _naviEngine.start();
+        debugPrint('✅ ナビゲーションエンジン開始');
+        
+        // 音声ナビを15秒ごとに実行
+        _voiceNaviTimer?.cancel();
+        _voiceNaviTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+          if (!_isDisposed && !_isNavigationPaused) {
+            _announceDirection();
+          }
+        });
+        debugPrint('✅ 音声ナビタイマー開始');
+        
+      } on TimeoutException catch (e) {
+        _safeSetState(() {
+          _gpsStatus = 'GPS取得タイムアウト: 屋外で再試行してください';
+        });
+        debugPrint('❌ タイムアウト: $e');
+        await widget.tts.speak('GPS信号を受信できません。屋外で再試行してください。');
+        return; // エラー時はストリーム開始せずに終了
+      } catch (e) {
+        _safeSetState(() {
+          _gpsStatus = 'GPS取得失敗: $e';
+        });
+        debugPrint('❌ 初期位置取得エラー: $e');
+        await widget.tts.speak('位置情報の取得に失敗しました。');
+        return; // エラー時はストリーム開始せずに終了
+      }
+
+      // 位置情報ストリーム開始
+      debugPrint('=== GPS位置情報ストリーム開始 ===');
       _positionStream = Geolocator.getPositionStream(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
-          distanceFilter: 1,
+          distanceFilter: 2, // 2m移動で更新（更新頻度を下げる）
         ),
-      ).listen((position) {
-        setState(() {
-          _currentPosition = position;
-          _updateNextPoint();
-        });
-      });
+      ).listen(
+        (position) {
+          if (_isDisposed) return;
+          
+          _positionUpdateCount++;
+          _lastPositionUpdateTime = DateTime.now();
+          
+          _safeSetState(() {
+            _currentPosition = position;
+            _gpsStatus = 'GPS更新中 (精度: ${position.accuracy.toStringAsFixed(1)}m, 更新: $_positionUpdateCount回)';
+            _updateNextPoint();
+          });
+          
+          // デバッグログは10回に1回だけ出力
+          if (_positionUpdateCount % 10 == 0) {
+            debugPrint('📍 位置更新 #$_positionUpdateCount: ${position.latitude}, ${position.longitude}');
+          }
+        },
+        onError: (error) {
+          debugPrint('❌ GPS位置情報ストリームエラー: $error');
+          if (!_isDisposed) {
+            _safeSetState(() {
+              _gpsStatus = 'GPSエラー: $error';
+            });
+          }
+        },
+      );
       
-      // 端末の方位センサーを監視
+      // 端末の方位センサーを監視（更新頻度を制限）
       _compassStream = FlutterCompass.events?.listen((CompassEvent event) {
-        setState(() {
+        if (_isDisposed) return;
+        // 方位は頻繁に更新されるので_safeSetStateを使用
+        _safeSetState(() {
           _deviceHeading = event.heading ?? 0.0;
         });
       });
-
-      await _naviEngine.start();
       
-      // 音声ナビを15秒ごとに実行
-      _voiceNaviTimer = Timer.periodic(const Duration(seconds: 15), (_) {
-        _announceDirection();
-      });
     } catch (e) {
-      _showError('位置情報の取得に失敗しました: $e');
+      if (!_isDisposed) {
+        _safeSetState(() {
+          _gpsStatus = '致命的エラー: $e';
+        });
+        _showError('位置情報の取得に失敗しました: $e');
+        debugPrint('位置情報追跡開始エラー: $e');
+      }
     }
   }
 
   void _updateNextPoint() {
-    if (_currentPosition == null) return;
+    if (_currentPosition == null || _isDisposed) return;
 
     NaviPoint? nearest;
     double? nearestDistance;
@@ -146,15 +322,18 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
       }
     }
 
-    setState(() {
-      _nextPoint = nearest;
-      _distanceToNext = nearestDistance;
-      
-      // 次の地点への方位を計算
-      if (nearest != null) {
-        _bearingToNext = nearest.bearingFrom(_currentPosition!);
-      }
-    });
+    // 値が変わった場合のみ更新
+    if (_nextPoint != nearest || _distanceToNext != nearestDistance) {
+      setState(() {
+        _nextPoint = nearest;
+        _distanceToNext = nearestDistance;
+        
+        // 次の地点への方位を計算
+        if (nearest != null) {
+          _bearingToNext = nearest.bearingFrom(_currentPosition!);
+        }
+      });
+    }
   }
   
   // 音声で方向と距離を案内
@@ -188,22 +367,26 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
   
   /// 音声ナビを再開
   void _startVoiceNavi() {
-    if (_voiceNaviTimer == null || !(_voiceNaviTimer!.isActive)) {
-      _voiceNaviTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+    if (_isDisposed) return;
+    
+    // 既存のタイマーをキャンセル
+    _voiceNaviTimer?.cancel();
+    _voiceNaviTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (!_isDisposed && !_isNavigationPaused) {
         _announceDirection();
-      });
-    }
+      }
+    });
   }
 
   /// 前方カメラで撮影してAI説明（右ボタン）
   Future<void> _describeFrontView() async {
-    if (_isCameraProcessing) return;
+    if (_isCameraProcessing || _isDisposed) return;
     if (_cameraController == null || !_cameraController!.value.isInitialized) {
       await widget.tts.speak('カメラが利用できません');
       return;
     }
 
-    setState(() {
+    _safeSetState(() {
       _isCameraProcessing = true;
       _isNavigationPaused = true; // ルート案内を一時停止
     });
@@ -219,12 +402,14 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
       final imageFile = File(image.path);
       
       // 最後に撮影した画像として保存
-      setState(() {
-        _lastCapturedImage = imageFile;
-      });
+      if (!_isDisposed) {
+        _safeSetState(() {
+          _lastCapturedImage = imageFile;
+        });
+      }
 
       // 撮影した画像を表示
-      if (mounted) {
+      if (mounted && !_isDisposed) {
         await showDialog(
           context: context,
           barrierDismissible: false,
@@ -233,37 +418,43 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
             tts: widget.tts,
             onCompleted: () {
               // ダイアログが閉じられた後、ルート案内を再開
-              setState(() {
-                _isNavigationPaused = false;
-              });
-              _startVoiceNavi(); // 音声ナビを再開
+              if (!_isDisposed) {
+                _safeSetState(() {
+                  _isNavigationPaused = false;
+                });
+                _startVoiceNavi(); // 音声ナビを再開
+              }
             },
           ),
         );
       }
     } catch (e) {
       await widget.tts.speak('エラーが発生しました');
-      print('カメラエラー: $e');
-      setState(() {
-        _isNavigationPaused = false;
-      });
-      _startVoiceNavi(); // エラー時も再開
+      debugPrint('カメラエラー: $e');
+      if (!_isDisposed) {
+        _safeSetState(() {
+          _isNavigationPaused = false;
+        });
+        _startVoiceNavi(); // エラー時も再開
+      }
     } finally {
-      setState(() {
-        _isCameraProcessing = false;
-      });
+      if (!_isDisposed) {
+        _safeSetState(() {
+          _isCameraProcessing = false;
+        });
+      }
     }
   }
 
   /// 音声命令を聞く（左ボタン）
   Future<void> _listenToVoiceCommand() async {
-    if (_isListening) return;
+    if (_isListening || _isDisposed) return;
     if (!_speechToText.isAvailable) {
       await widget.tts.speak('音声認識が利用できません');
       return;
     }
 
-    setState(() {
+    _safeSetState(() {
       _isListening = true;
       _isNavigationPaused = true; // ルート案内を一時停止
     });
@@ -279,11 +470,13 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
         onResult: (result) async {
           if (result.finalResult) {
             final command = result.recognizedWords;
-            print('認識された命令: $command');
+            debugPrint('認識された命令: $command');
 
-            setState(() {
-              _isListening = false;
-            });
+            if (!_isDisposed) {
+              _safeSetState(() {
+                _isListening = false;
+              });
+            }
 
             if (command.isNotEmpty) {
               // 画像に関する質問かどうかチェック
@@ -291,7 +484,7 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
               final isImageQuestion = imageKeywords.any((keyword) => command.contains(keyword));
               
               // 命令とAIの返事を表示するダイアログを表示
-              if (mounted) {
+              if (mounted && !_isDisposed) {
                 await showDialog(
                   context: context,
                   barrierDismissible: false,
@@ -301,19 +494,23 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
                     imageFile: (isImageQuestion && _lastCapturedImage != null) ? _lastCapturedImage : null,
                     onCompleted: () {
                       // ダイアログが閉じられた後、ルート案内を再開
-                      setState(() {
-                        _isNavigationPaused = false;
-                      });
-                      _startVoiceNavi(); // 音声ナビを再開
+                      if (!_isDisposed) {
+                        _safeSetState(() {
+                          _isNavigationPaused = false;
+                        });
+                        _startVoiceNavi(); // 音声ナビを再開
+                      }
                     },
                   ),
                 );
               }
             } else {
-              setState(() {
-                _isNavigationPaused = false;
-              });
-              _startVoiceNavi();
+              if (!_isDisposed) {
+                _safeSetState(() {
+                  _isNavigationPaused = false;
+                });
+                _startVoiceNavi();
+              }
             }
           }
         },
@@ -324,9 +521,9 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
 
       // タイムアウト処理
       await Future.delayed(const Duration(seconds: 10));
-      if (_isListening) {
+      if (_isListening && !_isDisposed) {
         await _speechToText.stop();
-        setState(() {
+        _safeSetState(() {
           _isListening = false;
           _isNavigationPaused = false;
         });
@@ -334,12 +531,14 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
       }
     } catch (e) {
       await widget.tts.speak('音声認識エラー');
-      print('音声認識エラー: $e');
-      setState(() {
-        _isListening = false;
-        _isNavigationPaused = false;
-      });
-      _startVoiceNavi();
+      debugPrint('音声認識エラー: $e');
+      if (!_isDisposed) {
+        _safeSetState(() {
+          _isListening = false;
+          _isNavigationPaused = false;
+        });
+        _startVoiceNavi();
+      }
     }
   }
 
@@ -428,7 +627,8 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
   String _getStateText() {
     switch (_currentState) {
       case NaviState.initial:
-        return '準備中...';
+        // GPS取得前は「GPS情報取得中」、取得後は「準備中」
+        return _currentPosition == null ? 'GPS情報取得中...' : '準備中...';
       case NaviState.navigating:
         return 'ナビゲーション中';
       case NaviState.paused:
@@ -471,11 +671,27 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
 
   @override
   void dispose() {
+    // 最初にdisposeフラグを設定して、以降の更新を防ぐ
+    _isDisposed = true;
+    
+    // 全てのストリームをキャンセル
     _positionStream?.cancel();
+    _positionStream = null;
+    
     _compassStream?.cancel();
+    _compassStream = null;
+    
+    // タイマーをキャンセル
     _voiceNaviTimer?.cancel();
+    _voiceNaviTimer = null;
+    
+    // カメラを停止
     _cameraController?.dispose();
+    _cameraController = null;
+    
+    // ナビゲーションエンジンを停止
     _naviEngine.dispose();
+    
     super.dispose();
   }
 
@@ -483,68 +699,98 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        toolbarHeight: 56, // 標準の高さ
-        backgroundColor: Colors.grey[900],
-        iconTheme: const IconThemeData(color: Colors.white, size: 20),
-        actions: [
-          // ステータスインジケータ（コンパクトに）
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-            margin: const EdgeInsets.only(right: 4),
-            decoration: BoxDecoration(
-              color: _currentState == NaviState.navigating
-                  ? Colors.green[700]
-                  : Colors.grey[700],
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(
-              _currentState == NaviState.navigating
-                  ? Icons.navigation
-                  : Icons.pause_circle,
-              size: 20,
-              color: Colors.white,
-            ),
-          ),
-          // 地図ボタン（大きく分かりやすく）
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.blue[700],
-              borderRadius: BorderRadius.circular(8),
-            ),
-            margin: const EdgeInsets.only(right: 4),
-            child: IconButton(
-              icon: const Icon(Icons.map, size: 32, color: Colors.white),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => RouteMapScreen(route: widget.route),
-                  ),
-                );
-              },
-              tooltip: '地図',
-              padding: const EdgeInsets.all(8),
-            ),
-          ),
-          // 停止ボタン（大きく分かりやすく）
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.red[700],
-              borderRadius: BorderRadius.circular(8),
-            ),
-            margin: const EdgeInsets.only(right: 8),
-            child: IconButton(
-              icon: const Icon(Icons.stop_circle, size: 32, color: Colors.white),
-              onPressed: _stopNavigation,
-              tooltip: '終了',
-              padding: const EdgeInsets.all(8),
-            ),
-          ),
-        ],
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(kToolbarHeight),
+        child: CommonAppBar(
+          pageTitle: 'ナビゲーション',
+          onAIChanged: () {
+            // AI変更時の処理（必要に応じて）
+          },
+        ),
       ),
       body: Column(
         children: [
+          // AppBarの下に追加のツールバー（ステータス、地図、中止ボタン）
+          Container(
+            height: 50,
+            color: Colors.grey[900],
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                // ステータス表示（文字）
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  margin: const EdgeInsets.only(right: 8),
+                  decoration: BoxDecoration(
+                    color: _currentState == NaviState.navigating
+                        ? Colors.green[700]
+                        : Colors.grey[700],
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    _getStateText(),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                // 地図ボタン（文字表示）
+                Container(
+                  margin: const EdgeInsets.only(right: 4),
+                  child: TextButton(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => RouteMapScreen(route: widget.route),
+                        ),
+                      );
+                    },
+                    style: TextButton.styleFrom(
+                      backgroundColor: Colors.blue[700],
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: const Text(
+                      '地図',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+                // 中止ボタン（文字表示）
+                Container(
+                  margin: const EdgeInsets.only(right: 8),
+                  child: TextButton(
+                    onPressed: _stopNavigation,
+                    style: TextButton.styleFrom(
+                      backgroundColor: Colors.red[700],
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: const Text(
+                      '中止',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
           // ルート名表示エリア（専用の行）
           Container(
             width: double.infinity,
@@ -589,21 +835,94 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(color: Colors.grey[700]!, width: 1),
                       ),
-                      child: Row(
+                      child: Column(
                         children: [
-                          // コンパス表示
+                          // 3D矢印ビュー / レーダービュー（上部）
                           Expanded(
                             flex: 2,
-                            child: Container(
-                              padding: const EdgeInsets.all(8),
-                              child: Stack(
-                                children: [
-                                  Center(
-                                    child: Column(
+                            child: GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  _show3DArrow = !_show3DArrow;
+                                });
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.all(8),
+                                child: _distanceToNext != null
+                                    ? Stack(
+                                        children: [
+                                          _show3DArrow
+                                              ? Arrow3DView(
+                                                  distanceMeters: _distanceToNext!,
+                                                  relativeBearing: _bearingToNext - _deviceHeading,
+                                                  arrowColor: Colors.blue[400]!,
+                                                )
+                                              : RadarView(
+                                                  distanceMeters: _distanceToNext!,
+                                                  relativeBearing: _bearingToNext - _deviceHeading,
+                                                  targetName: _nextPoint?.message,
+                                                  maxRangeMeters: _distanceToNext! > 100 ? 200 : 100,
+                                                ),
+                                          // 切り替えボタン
+                                          Positioned(
+                                            top: 4,
+                                            right: 4,
+                                            child: Container(
+                                              padding: const EdgeInsets.all(6),
+                                              decoration: BoxDecoration(
+                                                color: Colors.black.withOpacity(0.5),
+                                                borderRadius: BorderRadius.circular(6),
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(
+                                                    _show3DArrow ? Icons.view_in_ar : Icons.radar,
+                                                    size: 14,
+                                                    color: Colors.white,
+                                                  ),
+                                                  const SizedBox(width: 4),
+                                                  Text(
+                                                    _show3DArrow ? '3D' : 'レーダー',
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 10,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      )
+                                    : Center(
+                                        child: Text(
+                                          '位置情報取得中...',
+                                          style: TextStyle(
+                                            color: Colors.grey[400],
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                      ),
+                              ),
+                            ),
+                          ),
+                          Divider(color: Colors.grey[700], height: 1, thickness: 1),
+                          // コンパスと地点情報（下部）
+                          Expanded(
+                            flex: 1,
+                            child: Row(
+                              children: [
+                                // コンパス表示
+                                Expanded(
+                                  flex: 2,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(8),
+                                    child: Row(
                                       mainAxisAlignment: MainAxisAlignment.center,
                                       children: [
                                         Container(
-                                          padding: const EdgeInsets.all(12),
+                                          padding: const EdgeInsets.all(6),
                                           decoration: BoxDecoration(
                                             color: Colors.blue[900]!.withOpacity(0.3),
                                             shape: BoxShape.circle,
@@ -612,195 +931,166 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
                                             angle: (_bearingToNext - _deviceHeading) * 3.141592653589793 / 180,
                                             child: Icon(
                                               Icons.navigation,
-                                              size: 60,
+                                              size: 32,
                                               color: Colors.blue[300],
                                             ),
                                           ),
                                         ),
-                                        const SizedBox(height: 8),
-                                        Text(
-                                          _getDirectionText(),
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 20,
-                                            fontWeight: FontWeight.bold,
+                                        const SizedBox(width: 8),
+                                        Flexible(
+                                          child: Text(
+                                            _getDirectionText(),
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 18,
+                                              fontWeight: FontWeight.bold,
+                                            ),
                                           ),
                                         ),
                                       ],
                                     ),
                                   ),
-                                  // 磁北コンパス
-                                  Positioned(
-                                    top: 4,
-                                    right: 4,
-                                    child: Container(
-                                      padding: const EdgeInsets.all(4),
-                                      decoration: BoxDecoration(
-                                        color: Colors.black.withOpacity(0.7),
-                                        borderRadius: BorderRadius.circular(6),
-                                        border: Border.all(color: Colors.red[900]!, width: 1),
-                                      ),
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Transform.rotate(
-                                            angle: -_deviceHeading * 3.141592653589793 / 180,
-                                            child: const Icon(
-                                              Icons.navigation,
-                                              size: 16,
-                                              color: Colors.red,
-                                            ),
-                                          ),
-                                          const Text(
-                                            'N',
-                                            style: TextStyle(
-                                              color: Colors.red,
-                                              fontSize: 8,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                          Text(
-                                            '${_deviceHeading.round()}°',
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 8,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          // 地点情報
-                          Expanded(
-                            flex: 3,
-                            child: Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                border: Border(
-                                  left: BorderSide(color: Colors.grey[700]!, width: 1),
                                 ),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Icon(Icons.place, size: 16, color: Colors.blue[300]),
-                                      const SizedBox(width: 6),
-                                      const Text(
-                                        '次の地点',
-                                        style: TextStyle(
-                                          color: Colors.grey,
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.bold,
-                                        ),
+                                // 地点情報
+                                Expanded(
+                                  flex: 3,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      border: Border(
+                                        left: BorderSide(color: Colors.grey[700]!, width: 1),
                                       ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    _nextPoint?.message ?? '地点情報なし',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
                                     ),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  const SizedBox(height: 10),
-                                  Row(
-                                    children: [
-                                      // 距離カード
-                                      Expanded(
-                                        child: Container(
-                                          padding: const EdgeInsets.all(8),
-                                          decoration: BoxDecoration(
-                                            color: Colors.blue[900]!.withOpacity(0.3),
-                                            borderRadius: BorderRadius.circular(8),
-                                            border: Border.all(color: Colors.blue[700]!, width: 1),
-                                          ),
-                                          child: Column(
-                                            children: [
-                                              Row(
-                                                mainAxisAlignment: MainAxisAlignment.center,
-                                                children: [
-                                                  Icon(Icons.straighten, size: 12, color: Colors.grey[400]),
-                                                  const SizedBox(width: 4),
-                                                  Text(
-                                                    '距離',
-                                                    style: TextStyle(
-                                                      color: Colors.grey[400],
-                                                      fontSize: 10,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                              const SizedBox(height: 2),
-                                              Text(
-                                                '${_distanceToNext?.round() ?? '--'} m',
-                                                style: TextStyle(
-                                                  color: Colors.blue[300],
-                                                  fontSize: 16,
-                                                  fontWeight: FontWeight.bold,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      // 進捗カード
-                                      Expanded(
-                                        child: Container(
-                                          padding: const EdgeInsets.all(8),
-                                          decoration: BoxDecoration(
-                                            color: Colors.green[900]!.withOpacity(0.3),
-                                            borderRadius: BorderRadius.circular(8),
-                                            border: Border.all(color: Colors.green[700]!, width: 1),
-                                          ),
-                                          child: Column(
-                                            children: [
-                                              Row(
-                                                mainAxisAlignment: MainAxisAlignment.center,
-                                                children: [
-                                                  Icon(Icons.flag, size: 12, color: Colors.grey[400]),
-                                                  const SizedBox(width: 4),
-                                                  Text(
-                                                    '進捗',
-                                                    style: TextStyle(
-                                                      color: Colors.grey[400],
-                                                      fontSize: 10,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                              const SizedBox(height: 2),
-                                              Text(
-                                                '${_nextPoint?.no ?? '--'}/${widget.route.points.length}',
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Icon(Icons.place, size: 12, color: Colors.blue[300]),
+                                            const SizedBox(width: 4),
+                                            Expanded(
+                                              child: Text(
+                                                _nextPoint?.message ?? '地点情報なし',
                                                 style: const TextStyle(
                                                   color: Colors.white,
-                                                  fontSize: 16,
+                                                  fontSize: 14,
                                                   fontWeight: FontWeight.bold,
                                                 ),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
                                               ),
-                                            ],
-                                          ),
+                                            ),
+                                          ],
                                         ),
-                                      ),
-                                    ],
+                                        const SizedBox(height: 6),
+                                        Row(
+                                          children: [
+                                            Flexible(
+                                              child: Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.blue[900]!.withOpacity(0.3),
+                                                  borderRadius: BorderRadius.circular(6),
+                                                ),
+                                                child: Text(
+                                                  '${_distanceToNext?.round() ?? '--'}m',
+                                                  style: TextStyle(
+                                                    color: Colors.blue[300],
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Flexible(
+                                              child: Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.green[900]!.withOpacity(0.3),
+                                                  borderRadius: BorderRadius.circular(6),
+                                                ),
+                                                child: Text(
+                                                  '${_nextPoint?.no ?? '--'}/${widget.route.points.length}',
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                ],
-                              ),
+                                ),
+                              ],
                             ),
                           ),
                         ],
                       ),
+                    ),
+                  ),
+                  // GPS状態表示
+                  Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: _gpsStatus.contains('成功') || _gpsStatus.contains('更新中')
+                          ? Colors.green[900]!.withOpacity(0.3)
+                          : Colors.orange[900]!.withOpacity(0.3),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: _gpsStatus.contains('成功') || _gpsStatus.contains('更新中')
+                            ? Colors.green[700]!
+                            : Colors.orange[700]!,
+                        width: 1,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              _gpsStatus.contains('成功') || _gpsStatus.contains('更新中')
+                                  ? Icons.gps_fixed
+                                  : Icons.gps_not_fixed,
+                              size: 16,
+                              color: _gpsStatus.contains('成功') || _gpsStatus.contains('更新中')
+                                  ? Colors.green[400]
+                                  : Colors.orange[400],
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _gpsStatus,
+                                style: TextStyle(
+                                  color: _gpsStatus.contains('成功') || _gpsStatus.contains('更新中')
+                                      ? Colors.green[300]
+                                      : Colors.orange[300],
+                                  fontSize: 11,
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (_lastPositionUpdateTime != null) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            '最終更新: ${_lastPositionUpdateTime!.toString().substring(11, 19)}',
+                            style: TextStyle(
+                              color: Colors.grey[400],
+                              fontSize: 9,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                   // セクション2: 位置情報

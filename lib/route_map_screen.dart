@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'walking_route.dart';
+import 'common_header.dart';
 
 /// ルート地図表示画面
 class RouteMapScreen extends StatefulWidget {
@@ -147,43 +148,14 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          '${widget.route.name} - 地図',
-          style: const TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-          ),
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(kToolbarHeight),
+        child: CommonAppBar(
+          pageTitle: '${widget.route.name} - 地図',
+          onAIChanged: () {
+            // AI変更時の処理（必要に応じて）
+          },
         ),
-        backgroundColor: Colors.blue[800],
-        iconTheme: const IconThemeData(color: Colors.white),
-        titleTextStyle: const TextStyle(color: Colors.white),
-        actions: [
-          // 現在位置に移動ボタン
-          IconButton(
-            icon: const Icon(Icons.my_location),
-            onPressed: () {
-              if (_currentPosition != null) {
-                _mapController?.animateCamera(
-                  CameraUpdate.newLatLngZoom(
-                    LatLng(
-                      _currentPosition!.latitude,
-                      _currentPosition!.longitude,
-                    ),
-                    16,
-                  ),
-                );
-              }
-            },
-            tooltip: '現在位置へ',
-          ),
-          // ルート全体を表示ボタン
-          IconButton(
-            icon: const Icon(Icons.zoom_out_map),
-            onPressed: _fitRouteInView,
-            tooltip: 'ルート全体を表示',
-          ),
-        ],
       ),
       body: widget.route.points.isEmpty
           ? const Center(
@@ -192,22 +164,65 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
                 style: TextStyle(fontSize: 18),
               ),
             )
-          : GoogleMap(
-              onMapCreated: _onMapCreated,
-              initialCameraPosition: CameraPosition(
-                target: LatLng(
-                  widget.route.points.first.latitude,
-                  widget.route.points.first.longitude,
+          : Stack(
+              children: [
+                // 地図表示
+                GoogleMap(
+                  onMapCreated: _onMapCreated,
+                  initialCameraPosition: CameraPosition(
+                    target: LatLng(
+                      widget.route.points.first.latitude,
+                      widget.route.points.first.longitude,
+                    ),
+                    zoom: 15,
+                  ),
+                  markers: _markers,
+                  polylines: _polylines,
+                  myLocationEnabled: true,
+                  myLocationButtonEnabled: false,
+                  mapType: MapType.normal,
+                  compassEnabled: true,
+                  zoomControlsEnabled: false,
                 ),
-                zoom: 15,
-              ),
-              markers: _markers,
-              polylines: _polylines,
-              myLocationEnabled: true,
-              myLocationButtonEnabled: false,
-              mapType: MapType.normal,
-              compassEnabled: true,
-              zoomControlsEnabled: false,
+                // 右上に操作ボタン
+                Positioned(
+                  top: 16,
+                  right: 16,
+                  child: Column(
+                    children: [
+                      // 現在位置に移動ボタン
+                      FloatingActionButton(
+                        heroTag: 'my_location',
+                        mini: true,
+                        backgroundColor: Colors.white,
+                        child: const Icon(Icons.my_location, color: Colors.blue),
+                        onPressed: () {
+                          if (_currentPosition != null) {
+                            _mapController?.animateCamera(
+                              CameraUpdate.newLatLngZoom(
+                                LatLng(
+                                  _currentPosition!.latitude,
+                                  _currentPosition!.longitude,
+                                ),
+                                16,
+                              ),
+                            );
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      // ルート全体を表示ボタン
+                      FloatingActionButton(
+                        heroTag: 'zoom_out',
+                        mini: true,
+                        backgroundColor: Colors.white,
+                        child: const Icon(Icons.zoom_out_map, color: Colors.blue),
+                        onPressed: _fitRouteInView,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
     );
   }

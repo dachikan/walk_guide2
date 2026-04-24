@@ -2,7 +2,7 @@ name: walk_guide2
 description: "視覚障害者向けルートナビゲーションアプリ"
 publish_to: 'none'
 
-version: 1.0.0+1
+version: 0.0.20+1
 
 environment:
   sdk: ^3.11.0
@@ -23,6 +23,7 @@ dependencies:
   speech_to_text: ^7.0.0       # 音声認識
   http: ^1.2.0                 # API通信
   flutter_dotenv: ^5.1.0       # 環境変数管理
+  vector_math: ^2.1.4          # 3D計算用
 
 dev_dependencies:
   flutter_test:

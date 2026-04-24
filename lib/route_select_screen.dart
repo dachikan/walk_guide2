@@ -3,6 +3,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'route_service.dart';
 import 'walk_navi_screen.dart';
 import 'route_edit_screen.dart';
+import 'common_header.dart';
 
 /// ルート選択画面
 class RouteSelectScreen extends StatefulWidget {
@@ -159,24 +160,14 @@ class _RouteSelectScreenState extends State<RouteSelectScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        title: const Text(
-          'ルート選択',
-          style: TextStyle(
-            fontSize: 28,
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-          ),
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(kToolbarHeight),
+        child: CommonAppBar(
+          pageTitle: 'ルート選択',
+          onAIChanged: () {
+            // AI変更時の処理（必要に応じて）
+          },
         ),
-        backgroundColor: Colors.black,
-        iconTheme: const IconThemeData(color: Colors.white),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add, size: 32),
-            onPressed: _createNewRoute,
-            tooltip: '新規ルート作成',
-          ),
-        ],
       ),
       body: _isLoading
           ? const Center(

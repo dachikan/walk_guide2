@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'walking_route.dart';
 import 'route_service.dart';
+import 'common_header.dart';
 
 /// ルート編集画面
 class RouteEditScreen extends StatefulWidget {
@@ -302,17 +303,36 @@ class _RouteEditScreenState extends State<RouteEditScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.isNewRoute ? 'ルート新規作成' : 'ルート編集'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.save),
-            onPressed: _isSaving ? null : _saveRoute,
-          ),
-        ],
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(kToolbarHeight),
+        child: CommonAppBar(
+          pageTitle: widget.isNewRoute ? 'ルート新規作成' : 'ルート編集',
+          onAIChanged: () {
+            // AI変更時の処理（必要に応じて）
+          },
+        ),
       ),
       body: Column(
         children: [
+          // 保存ボタンのツールバー
+          Container(
+            height: 50,
+            color: Colors.grey[200],
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.save),
+                  label: const Text('保存'),
+                  onPressed: _isSaving ? null : _saveRoute,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue[700],
+                  ),
+                ),
+              ],
+            ),
+          ),
           // ルート名入力
           Padding(
             padding: const EdgeInsets.all(16.0),
