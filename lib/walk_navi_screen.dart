@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as dart_math;
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:geolocator/geolocator.dart';
@@ -10,8 +11,6 @@ import 'walking_route.dart';
 import 'walk_navi_engine.dart';
 import 'route_map_screen.dart';
 import 'ai_service.dart';
-import 'radar_view.dart';
-import 'arrow_3d_view.dart';
 import 'common_header.dart';
 
 /// ナビゲーション画面
@@ -49,9 +48,6 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
   LocationPermission? _locationPermission;
   int _positionUpdateCount = 0; // 位置更新回数
   DateTime? _lastPositionUpdateTime; // 最終更新時刻
-  
-  // 表示モード切り替え (true=3D矢印, false=レーダー)
-  bool _show3DArrow = true;
   
   // パフォーマンス対策
   bool _isDisposed = false; // 破棄済みフラグ
@@ -825,7 +821,7 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
               ),
               child: Column(
                 children: [
-                  // セクション1: ナビゲーション情報
+                  // セクション1: 3ブロックレイアウト（現在地 | 方向矢印 | 地点情報）
                   Expanded(
                     flex: 3,
                     child: Container(
@@ -835,339 +831,182 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(color: Colors.grey[700]!, width: 1),
                       ),
-                      child: Column(
-                        children: [
-                          // 3D矢印ビュー / レーダービュー（上部）
-                          Expanded(
-                            flex: 2,
-                            child: GestureDetector(
-                              onTap: () {
-                                setState(() {
-                                  _show3DArrow = !_show3DArrow;
-                                });
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.all(8),
-                                child: _distanceToNext != null
-                                    ? Stack(
-                                        children: [
-                                          _show3DArrow
-                                              ? Arrow3DView(
-                                                  distanceMeters: _distanceToNext!,
-                                                  relativeBearing: _bearingToNext - _deviceHeading,
-                                                  arrowColor: Colors.blue[400]!,
-                                                )
-                                              : RadarView(
-                                                  distanceMeters: _distanceToNext!,
-                                                  relativeBearing: _bearingToNext - _deviceHeading,
-                                                  targetName: _nextPoint?.message,
-                                                  maxRangeMeters: _distanceToNext! > 100 ? 200 : 100,
-                                                ),
-                                          // 切り替えボタン
-                                          Positioned(
-                                            top: 4,
-                                            right: 4,
-                                            child: Container(
-                                              padding: const EdgeInsets.all(6),
-                                              decoration: BoxDecoration(
-                                                color: Colors.black.withOpacity(0.5),
-                                                borderRadius: BorderRadius.circular(6),
-                                              ),
-                                              child: Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  Icon(
-                                                    _show3DArrow ? Icons.view_in_ar : Icons.radar,
-                                                    size: 14,
-                                                    color: Colors.white,
-                                                  ),
-                                                  const SizedBox(width: 4),
-                                                  Text(
-                                                    _show3DArrow ? '3D' : 'レーダー',
-                                                    style: const TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 10,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      )
-                                    : Center(
-                                        child: Text(
-                                          '位置情報取得中...',
-                                          style: TextStyle(
-                                            color: Colors.grey[400],
-                                            fontSize: 14,
-                                          ),
-                                        ),
-                                      ),
-                              ),
-                            ),
-                          ),
-                          Divider(color: Colors.grey[700], height: 1, thickness: 1),
-                          // コンパスと地点情報（下部）
-                          Expanded(
-                            flex: 1,
-                            child: Row(
+                      child: _currentPosition != null && _distanceToNext != null
+                          ? Row(
                               children: [
-                                // コンパス表示
+                                // 左ブロック：現在地情報
                                 Expanded(
                                   flex: 2,
                                   child: Container(
-                                    padding: const EdgeInsets.all(8),
-                                    child: Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        Container(
-                                          padding: const EdgeInsets.all(6),
-                                          decoration: BoxDecoration(
-                                            color: Colors.blue[900]!.withOpacity(0.3),
-                                            shape: BoxShape.circle,
-                                          ),
-                                          child: Transform.rotate(
-                                            angle: (_bearingToNext - _deviceHeading) * 3.141592653589793 / 180,
-                                            child: Icon(
-                                              Icons.navigation,
-                                              size: 32,
-                                              color: Colors.blue[300],
-                                            ),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Flexible(
-                                          child: Text(
-                                            _getDirectionText(),
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 18,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                                // 地点情報
-                                Expanded(
-                                  flex: 3,
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                                    decoration: BoxDecoration(
-                                      border: Border(
-                                        left: BorderSide(color: Colors.grey[700]!, width: 1),
-                                      ),
-                                    ),
+                                    padding: const EdgeInsets.all(12),
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       mainAxisAlignment: MainAxisAlignment.center,
                                       children: [
-                                        Row(
-                                          children: [
-                                            Icon(Icons.place, size: 12, color: Colors.blue[300]),
-                                            const SizedBox(width: 4),
-                                            Expanded(
-                                              child: Text(
-                                                _nextPoint?.message ?? '地点情報なし',
-                                                style: const TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 14,
-                                                  fontWeight: FontWeight.bold,
-                                                ),
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
-                                            ),
-                                          ],
+                                        Text(
+                                          '現在地',
+                                          style: TextStyle(
+                                            color: Colors.blue[300],
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 12),
+                                        Text(
+                                          '緯度 ${_currentPosition!.latitude.toStringAsFixed(5)}',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.visible,
+                                          softWrap: false,
                                         ),
                                         const SizedBox(height: 6),
-                                        Row(
+                                        Text(
+                                          '経度 ${_currentPosition!.longitude.toStringAsFixed(5)}',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.visible,
+                                          softWrap: false,
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          '方位 北${_deviceHeading.round()}°',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.visible,
+                                          softWrap: false,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                // 中ブロック：方向矢印とGPS状態
+                                Expanded(
+                                  flex: 3,
+                                  child: Stack(
+                                    children: [
+                                      // 矢印を中央に配置
+                                      Center(
+                                        child: Container(
+                                          padding: const EdgeInsets.all(16),
+                                          child: CustomPaint(
+                                            size: Size.infinite,
+                                            painter: _DirectionArrowPainter(
+                                              relativeBearing: _bearingToNext - _deviceHeading,
+                                              deviceHeading: _deviceHeading,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      // GPS状態を右下に小さく表示
+                                      Positioned(
+                                        right: 8,
+                                        bottom: 8,
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.end,
                                           children: [
-                                            Flexible(
-                                              child: Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.blue[900]!.withOpacity(0.3),
-                                                  borderRadius: BorderRadius.circular(6),
-                                                ),
-                                                child: Text(
-                                                  '${_distanceToNext?.round() ?? '--'}m',
-                                                  style: TextStyle(
-                                                    color: Colors.blue[300],
-                                                    fontSize: 12,
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                ),
+                                            Text(
+                                              _gpsStatus.contains('成功') ? 'GPS取得成功' : _gpsStatus,
+                                              style: TextStyle(
+                                                color: Colors.grey[500],
+                                                fontSize: 9,
                                               ),
                                             ),
-                                            const SizedBox(width: 6),
-                                            Flexible(
-                                              child: Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.green[900]!.withOpacity(0.3),
-                                                  borderRadius: BorderRadius.circular(6),
-                                                ),
-                                                child: Text(
-                                                  '${_nextPoint?.no ?? '--'}/${widget.route.points.length}',
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 12,
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
+                                            if (_currentPosition?.accuracy != null)
+                                              Text(
+                                                '精度 ${_currentPosition!.accuracy.toStringAsFixed(1)}m',
+                                                style: TextStyle(
+                                                  color: Colors.grey[500],
+                                                  fontSize: 9,
                                                 ),
                                               ),
-                                            ),
                                           ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                // 右ブロック：地点情報
+                                Expanded(
+                                  flex: 2,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(12),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Text(
+                                          '行き先',
+                                          style: TextStyle(
+                                            color: Colors.blue[300],
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 12),
+                                        Text(
+                                          '地点 ${_nextPoint?.no ?? '--'}/${widget.route.points.length}',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.visible,
+                                          softWrap: false,
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          '方向 ${_getDirectionText()}',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.visible,
+                                          softWrap: false,
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          '距離 ${_distanceToNext!.round()}m先',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.visible,
+                                          softWrap: false,
                                         ),
                                       ],
                                     ),
                                   ),
                                 ),
                               ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  // GPS状態表示
-                  Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: _gpsStatus.contains('成功') || _gpsStatus.contains('更新中')
-                          ? Colors.green[900]!.withOpacity(0.3)
-                          : Colors.orange[900]!.withOpacity(0.3),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: _gpsStatus.contains('成功') || _gpsStatus.contains('更新中')
-                            ? Colors.green[700]!
-                            : Colors.orange[700]!,
-                        width: 1,
-                      ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(
-                              _gpsStatus.contains('成功') || _gpsStatus.contains('更新中')
-                                  ? Icons.gps_fixed
-                                  : Icons.gps_not_fixed,
-                              size: 16,
-                              color: _gpsStatus.contains('成功') || _gpsStatus.contains('更新中')
-                                  ? Colors.green[400]
-                                  : Colors.orange[400],
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
+                            )
+                          : Center(
                               child: Text(
-                                _gpsStatus,
+                                'GPS情報取得中...',
                                 style: TextStyle(
-                                  color: _gpsStatus.contains('成功') || _gpsStatus.contains('更新中')
-                                      ? Colors.green[300]
-                                      : Colors.orange[300],
-                                  fontSize: 11,
+                                  color: Colors.grey[400],
+                                  fontSize: 14,
                                 ),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                          ],
-                        ),
-                        if (_lastPositionUpdateTime != null) ...[
-                          const SizedBox(height: 4),
-                          Text(
-                            '最終更新: ${_lastPositionUpdateTime!.toString().substring(11, 19)}',
-                            style: TextStyle(
-                              color: Colors.grey[400],
-                              fontSize: 9,
-                            ),
-                          ),
-                        ],
-                      ],
                     ),
                   ),
-                  // セクション2: 位置情報
-                  Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: Colors.grey[800]!.withOpacity(0.5),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.grey[700]!, width: 1),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(Icons.my_location, size: 14, color: Colors.green[400]),
-                            const SizedBox(width: 6),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '緯度',
-                                  style: TextStyle(
-                                    color: Colors.grey[500],
-                                    fontSize: 9,
-                                  ),
-                                ),
-                                Text(
-                                  _currentPosition?.latitude.toStringAsFixed(5) ?? '--',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.bold,
-                                    fontFamily: 'monospace',
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                        Container(
-                          width: 1,
-                          height: 30,
-                          color: Colors.grey[700],
-                        ),
-                        Row(
-                          children: [
-                            Icon(Icons.my_location, size: 14, color: Colors.green[400]),
-                            const SizedBox(width: 6),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '経度',
-                                  style: TextStyle(
-                                    color: Colors.grey[500],
-                                    fontSize: 9,
-                                  ),
-                                ),
-                                Text(
-                                  _currentPosition?.longitude.toStringAsFixed(5) ?? '--',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.bold,
-                                    fontFamily: 'monospace',
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 4),
                 ],
               ),
             ),
@@ -1692,3 +1531,176 @@ class _VoiceCommandDialogState extends State<_VoiceCommandDialog> {
     );
   }
 }
+
+/// 方向矢印を描画するCustomPainter（2等辺三角形）
+class _DirectionArrowPainter extends CustomPainter {
+  final double relativeBearing; // 目的地への相対方位（-180〜180度）
+  final double deviceHeading; // 端末の絶対方位（0〜360度）
+
+  _DirectionArrowPainter({
+    required this.relativeBearing,
+    required this.deviceHeading,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    // 正方形エリアを最大限確保（幅と高さの小さい方を使用）
+    final maxSize = size.width < size.height ? size.width : size.height;
+    final outerRadius = maxSize * 0.48; // 外側リング半径（大きく）
+    final innerRadius = maxSize * 0.32; // 内側リング半径（大きく）
+    final ringThickness = outerRadius - innerRadius;
+
+    // 1. ドーナツリング（外側の黒いリング）を描画
+    _drawDonutRing(canvas, center, outerRadius, innerRadius);
+
+    // 2. 東西南北の位置に白い丸を描画
+    _drawCardinalDots(canvas, center, outerRadius);
+
+    // 3. 大きな2等辺三角形（目的地方向）を描画（頂点が外側の円に接する）
+    _drawDirectionTriangle(canvas, center, outerRadius, innerRadius, relativeBearing);
+
+    // 4. 小さな赤い2等辺三角形（磁針/北方位）を中に描画
+    _drawCompassNeedle(canvas, center, innerRadius * 0.6, deviceHeading);
+  }
+
+  /// ドーナツリング（外側の黒いリング）
+  void _drawDonutRing(Canvas canvas, Offset center, double outerRadius, double innerRadius) {
+    final paint = Paint()
+      ..color = Colors.grey[900]!
+      ..style = PaintingStyle.fill;
+
+    // 外側の円を描画
+    canvas.drawCircle(center, outerRadius, paint);
+
+    // 内側の円を白で塗りつぶして穴を開ける
+    final holePaint = Paint()
+      ..color = Colors.grey[850]!
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(center, innerRadius, holePaint);
+
+    // リングの外縁
+    final borderPaint = Paint()
+      ..color = Colors.grey[700]!
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+    canvas.drawCircle(center, outerRadius, borderPaint);
+    canvas.drawCircle(center, innerRadius, borderPaint);
+  }
+
+  /// 東西南北の位置に白い丸を描画
+  void _drawCardinalDots(Canvas canvas, Offset center, double radius) {
+    final dotPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+
+    final dotRadius = 6.0;
+    final angles = [0.0, 90.0, 180.0, 270.0]; // 上、右、下、左
+
+    for (final angle in angles) {
+      final rad = (angle - 90) * 3.141592653589793 / 180; // -90で上が0度に
+      final dotCenter = Offset(
+        center.dx + radius * cos(rad),
+        center.dy + radius * sin(rad),
+      );
+      canvas.drawCircle(dotCenter, dotRadius, dotPaint);
+    }
+  }
+
+  /// 大きな2等辺三角形（目的地方向）
+  void _drawDirectionTriangle(Canvas canvas, Offset center, double outerRadius, double innerRadius, double bearing) {
+    final paint = Paint()
+      ..color = Colors.grey[700]!
+      ..style = PaintingStyle.fill;
+
+    // 角度をラジアンに変換（上向きを0度として、bearing分回転）
+    final angle = (bearing - 90) * 3.141592653589793 / 180;
+
+    // 三角形の3つの頂点を全て外側の円周上に配置
+    // 円周角の定理：頂点角度 = 180° - baseAngle
+    // 頂点角度45°にするため、baseAngle = 135°
+    final baseAngle = 135 * 3.141592653589793 / 180; // 先端から左右への中心角（135度）
+
+    final tip = Offset(
+      center.dx + outerRadius * cos(angle),
+      center.dy + outerRadius * sin(angle),
+    );
+    final left = Offset(
+      center.dx + outerRadius * cos(angle - baseAngle),
+      center.dy + outerRadius * sin(angle - baseAngle),
+    );
+    final right = Offset(
+      center.dx + outerRadius * cos(angle + baseAngle),
+      center.dy + outerRadius * sin(angle + baseAngle),
+    );
+
+    final path = Path()
+      ..moveTo(tip.dx, tip.dy)
+      ..lineTo(left.dx, left.dy)
+      ..lineTo(right.dx, right.dy)
+      ..close();
+
+    canvas.drawPath(path, paint);
+
+    // 輪郭を描画
+    final borderPaint = Paint()
+      ..color = Colors.grey[500]!
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+    canvas.drawPath(path, borderPaint);
+  }
+
+  /// 小さな赤い2等辺三角形（磁針/北方位）
+  void _drawCompassNeedle(Canvas canvas, Offset center, double radius, double heading) {
+    final paint = Paint()
+      ..color = Colors.red[400]!
+      ..style = PaintingStyle.fill;
+
+    // 北の方位（常に上向き、端末の回転に合わせて逆回転）
+    final angle = (-heading - 90) * 3.141592653589793 / 180;
+
+    // 三角形の頂点を計算（小さめの三角形）
+    final tipDistance = radius * 1.2;
+    final baseDistance = radius * 0.2;
+    final baseWidth = radius * 0.4;
+
+    final tip = Offset(
+      center.dx + tipDistance * cos(angle),
+      center.dy + tipDistance * sin(angle),
+    );
+    final left = Offset(
+      center.dx + baseDistance * cos(angle) - baseWidth * sin(angle),
+      center.dy + baseDistance * sin(angle) + baseWidth * cos(angle),
+    );
+    final right = Offset(
+      center.dx + baseDistance * cos(angle) + baseWidth * sin(angle),
+      center.dy + baseDistance * sin(angle) - baseWidth * cos(angle),
+    );
+
+    final path = Path()
+      ..moveTo(tip.dx, tip.dy)
+      ..lineTo(left.dx, left.dy)
+      ..lineTo(right.dx, right.dy)
+      ..close();
+
+    canvas.drawPath(path, paint);
+
+    // 輪郭を描画
+    final borderPaint = Paint()
+      ..color = Colors.red[200]!
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+    canvas.drawPath(path, borderPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _DirectionArrowPainter oldDelegate) {
+    return oldDelegate.relativeBearing != relativeBearing ||
+        oldDelegate.deviceHeading != deviceHeading;
+  }
+}
+
+// cos/sin関数のヘルパー
+double cos(double radians) => dart_math.cos(radians);
+double sin(double radians) => dart_math.sin(radians);
+

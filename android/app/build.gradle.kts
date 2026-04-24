@@ -5,6 +5,19 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// .envファイルからAPIキーを読み込む
+fun getEnvProperty(key: String, defaultValue: String = ""): String {
+    val envFile = rootProject.file("../.walking_guide.env")
+    if (envFile.exists()) {
+        envFile.readLines().forEach { line ->
+            if (line.startsWith(key)) {
+                return line.substringAfter("=").trim()
+            }
+        }
+    }
+    return defaultValue
+}
+
 android {
     namespace = "com.walkguide.walk_guide2"
     compileSdk = flutter.compileSdkVersion
@@ -28,6 +41,9 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        
+        // .envファイルからGoogle Maps APIキーを設定
+        manifestPlaceholders["GOOGLE_MAPS_API_KEY"] = getEnvProperty("GOOGLE_MAPS_API_KEY", "YOUR_API_KEY_HERE")
     }
 
     buildTypes {

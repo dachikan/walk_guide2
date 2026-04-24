@@ -35,26 +35,34 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
 
   /// ルートのマーカーを設定
   void _setupRouteMarkers() {
+    debugPrint('=== マーカー設定開始 ===');
+    debugPrint('地点数: ${widget.route.points.length}');
+    
     for (int i = 0; i < widget.route.points.length; i++) {
       final point = widget.route.points[i];
+      final markerColor = i == 0
+          ? BitmapDescriptor.hueGreen // 開始地点
+          : i == widget.route.points.length - 1
+              ? BitmapDescriptor.hueRed // 終了地点
+              : BitmapDescriptor.hueBlue; // 中間地点
+      
+      debugPrint('地点${point.no}: (${point.latitude}, ${point.longitude}) - 色: ${i == 0 ? "緑" : i == widget.route.points.length - 1 ? "赤" : "青"}');
+      
       _markers.add(
         Marker(
           markerId: MarkerId('point_${point.no}'),
           position: LatLng(point.latitude, point.longitude),
           infoWindow: InfoWindow(
-            title: '地点 ${point.no}',
+            title: '地点 ${point.no}${i == 0 ? " (開始)" : i == widget.route.points.length - 1 ? " (終了)" : " (中間)"}',
             snippet: point.message,
           ),
-          icon: BitmapDescriptor.defaultMarkerWithHue(
-            i == 0
-                ? BitmapDescriptor.hueGreen // 開始地点
-                : i == widget.route.points.length - 1
-                    ? BitmapDescriptor.hueRed // 終了地点
-                    : BitmapDescriptor.hueBlue, // 中間地点
-          ),
+          icon: BitmapDescriptor.defaultMarkerWithHue(markerColor),
+          // マーカーを見やすくするため、ラベルを追加
+          alpha: 1.0,
         ),
       );
     }
+    debugPrint('=== マーカー設定完了: ${_markers.length}個 ===');
   }
 
   /// ルートのポリラインを設定
@@ -62,6 +70,12 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
     final routePath = widget.route.points
         .map((point) => LatLng(point.latitude, point.longitude))
         .toList();
+
+    debugPrint('=== ポリライン設定 ===');
+    debugPrint('ポイント数: ${routePath.length}');
+    for (int i = 0; i < routePath.length; i++) {
+      debugPrint('  ポイント${i + 1}: ${routePath[i].latitude}, ${routePath[i].longitude}');
+    }
 
     _polylines.add(
       Polyline(
@@ -72,6 +86,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
         patterns: [PatternItem.dot, PatternItem.gap(10)],
       ),
     );
+    debugPrint('=== ポリライン設定完了 ===');
   }
 
   /// 現在位置の追跡を開始
@@ -128,14 +143,37 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
       if (point.longitude > maxLng) maxLng = point.longitude;
     }
 
-    final bounds = LatLngBounds(
-      southwest: LatLng(minLat, minLng),
-      northeast: LatLng(maxLat, maxLng),
-    );
-
-    _mapController?.animateCamera(
-      CameraUpdate.newLatLngBounds(bounds, 50),
-    );
+    // 緯度・経度の差分を計算
+    final latDiff = maxLat - minLat;
+    final lngDiff = maxLng - minLng;
+    
+    debugPrint('ルート範囲: 緯度差=${latDiff}, 経度差=${lngDiff}');
+    
+    // 地点が非常に近い場合（約50m以内）は固定ズームレベルを使用
+    if (latDiff < 0.0005 && lngDiff < 0.0005) {
+      // 中心点を計算
+      final centerLat = (minLat + maxLat) / 2;
+      final centerLng = (minLng + maxLng) / 2;
+      debugPrint('近距離ルート: 中心点=(${centerLat}, ${centerLng}), ズームレベル=18');
+      
+      _mapController?.animateCamera(
+        CameraUpdate.newLatLngZoom(
+          LatLng(centerLat, centerLng),
+          18, // 近距離の場合は高ズームレベル
+        ),
+      );
+    } else {
+      // 通常の範囲表示
+      final bounds = LatLngBounds(
+        southwest: LatLng(minLat, minLng),
+        northeast: LatLng(maxLat, maxLng),
+      );
+      debugPrint('通常ルート: bounds表示');
+      
+      _mapController?.animateCamera(
+        CameraUpdate.newLatLngBounds(bounds, 50),
+      );
+    }
   }
 
   @override
@@ -174,7 +212,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
                       widget.route.points.first.latitude,
                       widget.route.points.first.longitude,
                     ),
-                    zoom: 15,
+                    zoom: 18, // ズームレベルを上げて近距離の地点を区別しやすく
                   ),
                   markers: _markers,
                   polylines: _polylines,
@@ -220,6 +258,92 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
                         onPressed: _fitRouteInView,
                       ),
                     ],
+                  ),
+                ),
+                // 画面下部に地点リスト表示
+                Positioned(
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  child: Container(
+                    color: Colors.black87,
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '登録地点: ${widget.route.points.length}箇所',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          height: 60,
+                          child: ListView.builder(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: widget.route.points.length,
+                            itemBuilder: (context, index) {
+                              final point = widget.route.points[index];
+                              final markerColor = index == 0
+                                  ? Colors.green
+                                  : index == widget.route.points.length - 1
+                                      ? Colors.red
+                                      : Colors.blue;
+                              final label = index == 0
+                                  ? "開始"
+                                  : index == widget.route.points.length - 1
+                                      ? "終了"
+                                      : "中間";
+                              
+                              return GestureDetector(
+                                onTap: () {
+                                  // 地点に移動
+                                  _mapController?.animateCamera(
+                                    CameraUpdate.newLatLngZoom(
+                                      LatLng(point.latitude, point.longitude),
+                                      18,
+                                    ),
+                                  );
+                                },
+                                child: Container(
+                                  width: 100,
+                                  margin: const EdgeInsets.only(right: 8),
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: markerColor.withOpacity(0.2),
+                                    border: Border.all(color: markerColor, width: 2),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Text(
+                                        '地点${point.no}',
+                                        style: TextStyle(
+                                          color: markerColor,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      Text(
+                                        label,
+                                        style: TextStyle(
+                                          color: markerColor,
+                                          fontSize: 10,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
