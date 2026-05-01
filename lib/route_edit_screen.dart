@@ -250,6 +250,12 @@ class _RouteEditScreenState extends State<RouteEditScreen> {
     }
   }
 
+  // ファイル名サニタイズ関数
+  String _sanitizeFileName(String name) {
+    // 英数字・アンダースコア以外をアンダースコアに変換
+    return name.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_');
+  }
+
   /// ルートを保存
   void _saveRoute() async {
     if (_routeNameController.text.trim().isEmpty) {
@@ -266,6 +272,15 @@ class _RouteEditScreenState extends State<RouteEditScreen> {
       return;
     }
 
+    final safeName = _sanitizeFileName(_routeNameController.text.trim());
+    if (safeName.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ルート名は英数字で入力してください')),
+      );
+      return;
+    }
+    final fileName = '$safeName.csv';
+
     setState(() {
       _isSaving = true;
     });
@@ -276,27 +291,42 @@ class _RouteEditScreenState extends State<RouteEditScreen> {
         points: _points,
       );
 
-      final fileName = '${_routeNameController.text.trim()}.csv';
+      // 保存先パスを取得して表示（デバッグ用）
+      final directory = await RouteService.getAppDocDirectoryPath();
+      final fullPath = '$directory/$fileName';
+      print('=== ルート保存デバッグ開始 ===');
+      print('ルート名: ${route.name}');
+      print('地点数: ${_points.length}');
+      print('ファイル名: $fileName');
+      print('保存先: $fullPath');
+
       await RouteService.saveRoute(route, fileName);
+      
+      print('保存成功！');
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('ルートを保存しました')),
+          SnackBar(content: Text('ルートを保存しました\n保存先: $fullPath')),
         );
         Navigator.pop(context, true); // 保存成功を通知
       }
     } catch (e) {
+      print('=== 保存エラー発生 ===');
+      print('エラー: $e');
+      print('スタックトレース: ${StackTrace.current}');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('保存エラー: $e')),
+          SnackBar(
+            content: Text('保存エラー: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
         );
       }
     } finally {
-      if (mounted) {
-        setState(() {
-          _isSaving = false;
-        });
-      }
+      setState(() {
+        _isSaving = false;
+      });
     }
   }
 

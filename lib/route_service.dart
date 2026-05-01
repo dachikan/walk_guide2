@@ -6,6 +6,11 @@ import 'walking_route.dart';
 
 /// ルートCSVファイル管理サービス
 class RouteService {
+    /// ドキュメントディレクトリのパスを返す（デバッグ用）
+    static Future<String> getAppDocDirectoryPath() async {
+      final directory = await getApplicationDocumentsDirectory();
+      return directory.path;
+    }
   /// 利用可能なルート一覧を取得（アセット＋カスタム）
   static Future<List<RouteInfo>> getAvailableRoutes() async {
     final routes = <RouteInfo>[];
@@ -101,13 +106,27 @@ class RouteService {
   /// 新しいルートをCSVファイルとして保存
   static Future<void> saveRoute(WalkRoute route, String fileName) async {
     try {
+      print('[RouteService] 保存処理開始');
       final directory = await getApplicationDocumentsDirectory();
+      print('[RouteService] ディレクトリ取得: ${directory.path}');
+      
       final file = File('${directory.path}/$fileName');
+      print('[RouteService] ファイルパス: ${file.path}');
 
       // CSV形式で保存（ヘッダー付き）
       final csvString = route.toCsv();
+      print('[RouteService] CSV生成完了（${csvString.length}文字）');
+      
       await file.writeAsString(csvString);
-    } catch (e) {
+      print('[RouteService] ファイル書き込み完了');
+      
+      // 保存確認
+      final exists = await file.exists();
+      print('[RouteService] ファイル存在確認: $exists');
+      
+    } catch (e, stackTrace) {
+      print('[RouteService] エラー発生: $e');
+      print('[RouteService] スタックトレース: $stackTrace');
       throw Exception('ルート保存エラー: $e');
     }
   }

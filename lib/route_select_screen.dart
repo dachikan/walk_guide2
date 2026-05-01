@@ -164,119 +164,130 @@ class _RouteSelectScreenState extends State<RouteSelectScreen> {
         preferredSize: const Size.fromHeight(kToolbarHeight),
         child: CommonAppBar(
           pageTitle: 'ルート選択',
-          onAIChanged: () {
-            // AI変更時の処理（必要に応じて）
-          },
+          onAIChanged: () {},
         ),
       ),
-      body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: Colors.white),
-            )
-          : _routes.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Text(
-                        'ルートが見つかりません',
-                        style: TextStyle(color: Colors.white, fontSize: 24),
-                      ),
-                      const SizedBox(height: 20),
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.add),
-                        label: const Text('新規ルート作成'),
-                        onPressed: _createNewRoute,
-                      ),
-                    ],
-                  ),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _routes.length,
-                  itemBuilder: (context, index) {
-                    final route = _routes[index];
-                    return Card(
-                      color: Colors.grey[900],
-                      margin: const EdgeInsets.only(bottom: 16),
-                      child: InkWell(
-                        onTap: () => _selectRoute(route),
-                        child: Padding(
-                          padding: const EdgeInsets.all(20),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      route.displayName,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 28,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                  if (route.isCustom)
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 4,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: Colors.blue[700],
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: const Text(
-                                        'カスタム',
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 12,
+      body: Column(
+        children: [
+          Expanded(
+            child: _isLoading
+                ? const Center(
+                    child: CircularProgressIndicator(color: Colors.white),
+                  )
+                : _routes.isEmpty
+                    ? Center(
+                        child: Text(
+                          'ルートが見つかりません',
+                          style: TextStyle(color: Colors.white, fontSize: 24),
+                        ),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: _routes.length,
+                        itemBuilder: (context, index) {
+                          final route = _routes[index];
+                          return Card(
+                            color: Colors.grey[900],
+                            margin: const EdgeInsets.only(bottom: 16),
+                            child: InkWell(
+                              onTap: () => _selectRoute(route),
+                              child: Padding(
+                                padding: const EdgeInsets.all(20),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            route.displayName,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 28,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
                                         ),
+                                        if (route.isCustom)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 4,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Colors.blue[700],
+                                              borderRadius: BorderRadius.circular(4),
+                                            ),
+                                            child: const Text(
+                                              'カスタム',
+                                              style: TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      route.description,
+                                      style: TextStyle(
+                                        color: Colors.grey[400],
+                                        fontSize: 18,
                                       ),
                                     ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                route.description,
-                                style: TextStyle(
-                                  color: Colors.grey[400],
-                                  fontSize: 18,
+                                    const SizedBox(height: 12),
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.end,
+                                      children: [
+                                        if (route.isCustom) ...[
+                                          IconButton(
+                                            icon: const Icon(Icons.edit, color: Colors.white),
+                                            onPressed: () => _editRoute(route),
+                                            tooltip: '編集',
+                                          ),
+                                          IconButton(
+                                            icon: const Icon(Icons.delete, color: Colors.red),
+                                            onPressed: () => _deleteRoute(route),
+                                            tooltip: '削除',
+                                          ),
+                                          const SizedBox(width: 8),
+                                        ],
+                                        Icon(
+                                          Icons.arrow_forward,
+                                          color: Colors.blue[300],
+                                          size: 32,
+                                        ),
+                                      ],
+                                    ),
+                                  ],
                                 ),
                               ),
-                              const SizedBox(height: 12),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.end,
-                                children: [
-                                  if (route.isCustom) ...[
-                                    IconButton(
-                                      icon: const Icon(Icons.edit, color: Colors.white),
-                                      onPressed: () => _editRoute(route),
-                                      tooltip: '編集',
-                                    ),
-                                    IconButton(
-                                      icon: const Icon(Icons.delete, color: Colors.red),
-                                      onPressed: () => _deleteRoute(route),
-                                      tooltip: '削除',
-                                    ),
-                                    const SizedBox(width: 8),
-                                  ],
-                                  Icon(
-                                    Icons.arrow_forward,
-                                    color: Colors.blue[300],
-                                    size: 32,
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
+                            ),
+                          );
+                        },
                       ),
-                    );
-                  },
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+            child: SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.add),
+                label: const Text('新規ルート作成'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  foregroundColor: Colors.white,
+                  textStyle: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
+                onPressed: _createNewRoute,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
