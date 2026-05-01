@@ -117,7 +117,17 @@ class RouteService {
         print('[RouteService] アセット読み込み完了（${csvString.length}文字）');
       }
       
-      final csvData = const CsvToListConverter().convert(csvString);
+      print('[RouteService] ===== CSV内容デバッグ =====');
+      print('[RouteService] CSV全文:');
+      print(csvString);
+      print('[RouteService] CSV文字数: ${csvString.length}');
+      print('[RouteService] 改行コード確認: ${csvString.replaceAll('\n', '[LF]').replaceAll('\r', '[CR]')}');
+      print('[RouteService] ===== CSV内容ここまで =====');
+      
+      // 改行コードを統一（\r\nや\rを\nに変換）
+      final normalizedCsv = csvString.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+      
+      final csvData = const CsvToListConverter(eol: '\n').convert(normalizedCsv);
       print('[RouteService] CSV解析完了（${csvData.length}行）');
 
       final points = <NaviPoint>[];

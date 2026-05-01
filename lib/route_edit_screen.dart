@@ -1,13 +1,17 @@
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
-import 'walking_route.dart';
-import 'route_service.dart';
-import 'common_header.dart';
 
-/// ルート編集画面
+import 'common_header.dart';
+import 'route_service.dart';
+import 'walking_route.dart';
+
+/// ルート初期作成画面
 class RouteEditScreen extends StatefulWidget {
-  final WalkRoute? initialRoute; // 既存ルート編集の場合
-  final bool isNewRoute; // 新規作成かどうか
+  final WalkRoute? initialRoute;
+  final bool isNewRoute;
 
   const RouteEditScreen({
     Key? key,
@@ -21,13 +25,28 @@ class RouteEditScreen extends StatefulWidget {
 
 class _RouteEditScreenState extends State<RouteEditScreen> {
   late TextEditingController _routeNameController;
+  late TextEditingController _stepIntervalController;
   late List<NaviPoint> _points;
+
   bool _isSaving = false;
+  bool _isAutoRegistering = false;
+
+  StreamSubscription<Position>? _positionSubscription;
+  Position? _lastAutoPosition;
+  double _accumulatedMeters = 0.0;
+  double _autoRegisterMeters = 3.5;
+
+  static const double _duplicateThresholdMeters = 1.0;
+  static const double _estimatedMetersPerStep = 0.7;
+  static const double _colNoWidth = 40;
+  static const double _colLatWidth = 94;
+  static const double _colLonWidth = 94;
+  static const double _colHeadingWidth = 52;
 
   @override
   void initState() {
     super.initState();
-    
+
     if (widget.initialRoute != null) {
       _routeNameController = TextEditingController(text: widget.initialRoute!.name);
       _points = List.from(widget.initialRoute!.points);
@@ -35,229 +54,225 @@ class _RouteEditScreenState extends State<RouteEditScreen> {
       _routeNameController = TextEditingController();
       _points = [];
     }
+
+    _stepIntervalController = TextEditingController(text: '5');
   }
 
   @override
   void dispose() {
+    _positionSubscription?.cancel();
     _routeNameController.dispose();
+    _stepIntervalController.dispose();
     super.dispose();
   }
 
-  /// 現在位置を新しい地点として追加
-  void _addCurrentLocation() async {
-    try {
-      final permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        await Geolocator.requestPermission();
+  Future<bool> _ensureLocationPermission() async {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('位置情報サービスがOFFです')),
+        );
       }
+      return false;
+    }
 
-      final position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.best,
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('位置情報の権限が必要です')),
+        );
+      }
+      return false;
+    }
+
+    return true;
+  }
+
+  bool _addPointFromPosition(
+    Position position, {
+    bool showAddedMessage = false,
+    bool showDuplicateMessage = true,
+  }) {
+    if (_points.isNotEmpty) {
+      final lastPoint = _points.last;
+      final distance = Geolocator.distanceBetween(
+        lastPoint.latitude,
+        lastPoint.longitude,
+        position.latitude,
+        position.longitude,
       );
 
-      setState(() {
-        _points.add(NaviPoint(
+      if (distance < _duplicateThresholdMeters) {
+        if (showDuplicateMessage && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('直前地点から1m以内のため追加しませんでした')),
+          );
+        }
+        return false;
+      }
+    }
+
+    setState(() {
+      _points.add(
+        NaviPoint(
           no: _points.length + 1,
           latitude: position.latitude,
           longitude: position.longitude,
           heading: 0.0,
           triggerDistance: 10.0,
           message: '地点${_points.length + 1}',
-        ));
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('現在位置を追加しました')),
+        ),
       );
-    } catch (e) {
+    });
+
+    if (showAddedMessage && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('位置取得エラー: $e')),
+        SnackBar(content: Text('地点${_points.length}を追加しました')),
+      );
+    }
+
+    return true;
+  }
+
+  Future<void> _addCurrentLocation() async {
+    try {
+      final allowed = await _ensureLocationPermission();
+      if (!allowed) {
+        return;
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.best,
+      );
+
+      _addPointFromPosition(position, showAddedMessage: true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('位置取得エラー: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _toggleAutoRegister() async {
+    if (_isAutoRegistering) {
+      await _stopAutoRegister();
+      return;
+    }
+
+    final steps = int.tryParse(_stepIntervalController.text.trim()) ?? 5;
+    final clampedSteps = math.max(1, steps);
+    _autoRegisterMeters = clampedSteps * _estimatedMetersPerStep;
+
+    final allowed = await _ensureLocationPermission();
+    if (!allowed) {
+      return;
+    }
+
+    setState(() {
+      _isAutoRegistering = true;
+      _accumulatedMeters = 0.0;
+      _lastAutoPosition = null;
+    });
+
+    _positionSubscription = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.best,
+        distanceFilter: 1,
+      ),
+    ).listen(_onAutoPosition, onError: (Object e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('自動登録エラー: $e')),
+        );
+      }
+      _stopAutoRegister();
+    });
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${clampedSteps}歩ごとの自動登録を開始しました')),
       );
     }
   }
 
-  /// 地点を手動で追加
-  void _addPointManually() {
-    showDialog(
-      context: context,
-      builder: (context) {
-        final latController = TextEditingController();
-        final lonController = TextEditingController();
-        final msgController = TextEditingController(text: '地点${_points.length + 1}');
+  void _onAutoPosition(Position position) {
+    if (!_isAutoRegistering) {
+      return;
+    }
 
-        return AlertDialog(
-          title: const Text('地点を追加'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: latController,
-                decoration: const InputDecoration(labelText: '緯度'),
-                keyboardType: TextInputType.number,
-              ),
-              TextField(
-                controller: lonController,
-                decoration: const InputDecoration(labelText: '経度'),
-                keyboardType: TextInputType.number,
-              ),
-              TextField(
-                controller: msgController,
-                decoration: const InputDecoration(labelText: 'メッセージ'),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('キャンセル'),
-            ),
-            TextButton(
-              onPressed: () {
-                final lat = double.tryParse(latController.text);
-                final lon = double.tryParse(lonController.text);
+    if (_lastAutoPosition == null) {
+      _lastAutoPosition = position;
+      _addPointFromPosition(position, showDuplicateMessage: false);
+      return;
+    }
 
-                if (lat != null && lon != null) {
-                  setState(() {
-                    _points.add(NaviPoint(
-                      no: _points.length + 1,
-                      latitude: lat,
-                      longitude: lon,
-                      heading: 0.0,
-                      triggerDistance: 10.0,
-                      message: msgController.text,
-                    ));
-                  });
-                  Navigator.pop(context);
-                }
-              },
-              child: const Text('追加'),
-            ),
-          ],
-        );
-      },
+    final segment = Geolocator.distanceBetween(
+      _lastAutoPosition!.latitude,
+      _lastAutoPosition!.longitude,
+      position.latitude,
+      position.longitude,
     );
+
+    _lastAutoPosition = position;
+    _accumulatedMeters += segment;
+
+    if (_accumulatedMeters >= _autoRegisterMeters) {
+      final added = _addPointFromPosition(position, showDuplicateMessage: false);
+      if (added) {
+        _accumulatedMeters = 0.0;
+      }
+    }
   }
 
-  /// 地点を編集
-  void _editPoint(int index) {
-    final point = _points[index];
-    
-    showDialog(
-      context: context,
-      builder: (context) {
-        final latController = TextEditingController(text: point.latitude.toString());
-        final lonController = TextEditingController(text: point.longitude.toString());
-        final msgController = TextEditingController(text: point.message);
-        final distController = TextEditingController(text: point.triggerDistance.toString());
+  Future<void> _stopAutoRegister() async {
+    await _positionSubscription?.cancel();
+    _positionSubscription = null;
 
-        return AlertDialog(
-          title: Text('地点${point.no}を編集'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: latController,
-                  decoration: const InputDecoration(labelText: '緯度'),
-                  keyboardType: TextInputType.number,
-                ),
-                TextField(
-                  controller: lonController,
-                  decoration: const InputDecoration(labelText: '経度'),
-                  keyboardType: TextInputType.number,
-                ),
-                TextField(
-                  controller: msgController,
-                  decoration: const InputDecoration(labelText: 'メッセージ'),
-                ),
-                TextField(
-                  controller: distController,
-                  decoration: const InputDecoration(labelText: 'トリガー距離(m)'),
-                  keyboardType: TextInputType.number,
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('キャンセル'),
-            ),
-            TextButton(
-              onPressed: () {
-                final lat = double.tryParse(latController.text);
-                final lon = double.tryParse(lonController.text);
-                final dist = double.tryParse(distController.text);
+    if (!mounted) {
+      return;
+    }
 
-                if (lat != null && lon != null && dist != null) {
-                  setState(() {
-                    _points[index] = _points[index].copyWith(
-                      latitude: lat,
-                      longitude: lon,
-                      message: msgController.text,
-                      triggerDistance: dist,
-                    );
-                  });
-                  Navigator.pop(context);
-                }
-              },
-              child: const Text('保存'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  /// 地点を削除
-  void _deletePoint(int index) {
     setState(() {
-      _points.removeAt(index);
-      // 地点番号を振り直す
+      _isAutoRegistering = false;
+      _accumulatedMeters = 0.0;
+      _lastAutoPosition = null;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('自動登録を停止しました')),
+    );
+  }
+
+  void _renumberPoints() {
+    if (_points.isEmpty) {
+      return;
+    }
+
+    setState(() {
       for (int i = 0; i < _points.length; i++) {
-        _points[i] = _points[i].copyWith(no: i + 1);
+        _points[i] = _points[i].copyWith(no: i + 1, message: '地点${i + 1}');
       }
     });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('番号を振り直しました')),
+    );
   }
 
-  /// 地点を上に移動
-  void _movePointUp(int index) {
-    if (index > 0) {
-      setState(() {
-        final temp = _points[index];
-        _points[index] = _points[index - 1];
-        _points[index - 1] = temp;
-        // 地点番号を振り直す
-        for (int i = 0; i < _points.length; i++) {
-          _points[i] = _points[i].copyWith(no: i + 1);
-        }
-      });
-    }
-  }
-
-  /// 地点を下に移動
-  void _movePointDown(int index) {
-    if (index < _points.length - 1) {
-      setState(() {
-        final temp = _points[index];
-        _points[index] = _points[index + 1];
-        _points[index + 1] = temp;
-        // 地点番号を振り直す
-        for (int i = 0; i < _points.length; i++) {
-          _points[i] = _points[i].copyWith(no: i + 1);
-        }
-      });
-    }
-  }
-
-  // ファイル名サニタイズ関数
   String _sanitizeFileName(String name) {
-    // 英数字・アンダースコア以外をアンダースコアに変換
     return name.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_');
   }
 
-  /// ルートを保存
-  void _saveRoute() async {
+  Future<void> _saveRoute() async {
     if (_routeNameController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('ルート名を入力してください')),
@@ -279,6 +294,7 @@ class _RouteEditScreenState extends State<RouteEditScreen> {
       );
       return;
     }
+
     final fileName = '$safeName.csv';
 
     setState(() {
@@ -291,29 +307,15 @@ class _RouteEditScreenState extends State<RouteEditScreen> {
         points: _points,
       );
 
-      // 保存先パスを取得して表示（デバッグ用）
-      final directory = await RouteService.getAppDocDirectoryPath();
-      final fullPath = '$directory/$fileName';
-      print('=== ルート保存デバッグ開始 ===');
-      print('ルート名: ${route.name}');
-      print('地点数: ${_points.length}');
-      print('ファイル名: $fileName');
-      print('保存先: $fullPath');
-
       await RouteService.saveRoute(route, fileName);
-      
-      print('保存成功！');
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('ルートを保存しました\n保存先: $fullPath')),
+          const SnackBar(content: Text('ルートを保存しました')),
         );
-        Navigator.pop(context, true); // 保存成功を通知
+        Navigator.pop(context, true);
       }
     } catch (e) {
-      print('=== 保存エラー発生 ===');
-      print('エラー: $e');
-      print('スタックトレース: ${StackTrace.current}');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -324,159 +326,234 @@ class _RouteEditScreenState extends State<RouteEditScreen> {
         );
       }
     } finally {
-      setState(() {
-        _isSaving = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+        });
+      }
     }
+  }
+
+  double _distanceFromPrevious(int index) {
+    if (index == 0) {
+      return 0.0;
+    }
+
+    final prev = _points[index - 1];
+    final curr = _points[index];
+    return Geolocator.distanceBetween(
+      prev.latitude,
+      prev.longitude,
+      curr.latitude,
+      curr.longitude,
+    );
+  }
+
+  Widget _buildHeaderRow() {
+    const compactHeaderStyle = TextStyle(
+      color: Colors.white,
+      fontSize: 12,
+      fontWeight: FontWeight.bold,
+    );
+    const headerStyle = TextStyle(
+      color: Colors.white,
+      fontSize: 16,
+      fontWeight: FontWeight.bold,
+    );
+
+    return Container(
+      color: Colors.black,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Row(
+        children: [
+          SizedBox(width: _colNoWidth, child: Text('No', style: compactHeaderStyle)),
+          SizedBox(width: _colLatWidth, child: Text('緯度', style: compactHeaderStyle)),
+          SizedBox(width: _colLonWidth, child: Text('経度', style: compactHeaderStyle)),
+          SizedBox(width: _colHeadingWidth, child: Text('方向', style: headerStyle)),
+          Expanded(child: Text('コメント', style: headerStyle, overflow: TextOverflow.ellipsis)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPointRow(int index) {
+    final point = _points[index];
+    const compactValueStyle = TextStyle(
+      color: Colors.white,
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+    );
+    const valueStyle = TextStyle(
+      color: Colors.white,
+      fontSize: 14,
+      fontWeight: FontWeight.w600,
+    );
+
+    return Container(
+      color: index.isEven ? Colors.black : Colors.grey[900],
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Row(
+        children: [
+          SizedBox(width: _colNoWidth, child: Text('${point.no}', style: compactValueStyle)),
+          SizedBox(
+            width: _colLatWidth,
+            child: Text(point.latitude.toStringAsFixed(5), style: compactValueStyle),
+          ),
+          SizedBox(
+            width: _colLonWidth,
+            child: Text(point.longitude.toStringAsFixed(5), style: compactValueStyle),
+          ),
+          SizedBox(
+            width: _colHeadingWidth,
+            child: Text(point.heading.toStringAsFixed(0), style: valueStyle),
+          ),
+          Expanded(
+            child: Text(
+              point.message,
+              style: valueStyle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.black,
       appBar: PreferredSize(
         preferredSize: const Size.fromHeight(kToolbarHeight),
         child: CommonAppBar(
-          pageTitle: widget.isNewRoute ? 'ルート新規作成' : 'ルート編集',
-          onAIChanged: () {
-            // AI変更時の処理（必要に応じて）
-          },
+          pageTitle: 'ルート初期作成',
+          onAIChanged: () {},
         ),
       ),
       body: Column(
         children: [
-          // 保存ボタンのツールバー
           Container(
-            height: 50,
-            color: Colors.grey[200],
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.save),
-                  label: const Text('保存'),
-                  onPressed: _isSaving ? null : _saveRoute,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue[700],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // ルート名入力
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: TextField(
-              controller: _routeNameController,
-              decoration: const InputDecoration(
-                labelText: 'ルート名',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ),
-
-          // 地点追加ボタン
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            color: Colors.black,
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
             child: Row(
               children: [
                 Expanded(
                   child: ElevatedButton.icon(
                     icon: const Icon(Icons.my_location),
-                    label: const Text('現在位置'),
+                    label: const Text(
+                      '現在位置\n追加',
+                      textAlign: TextAlign.center,
+                    ),
                     onPressed: _addCurrentLocation,
+                    style: ElevatedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(56),
+                      textStyle: const TextStyle(fontSize: 13, height: 1.15),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: ElevatedButton.icon(
-                    icon: const Icon(Icons.add),
-                    label: const Text('手動追加'),
-                    onPressed: _addPointManually,
+                    icon: Icon(_isAutoRegistering ? Icons.pause : Icons.directions_walk),
+                    label: const Text(
+                      '自動登録\n間隔',
+                      textAlign: TextAlign.center,
+                    ),
+                    onPressed: _toggleAutoRegister,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _isAutoRegistering ? Colors.orange[700] : Colors.blue[700],
+                      minimumSize: const Size.fromHeight(56),
+                      textStyle: const TextStyle(fontSize: 13, height: 1.15),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 64,
+                  child: TextField(
+                    controller: _stepIntervalController,
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      labelText: '歩数',
+                      labelStyle: TextStyle(color: Colors.grey[300]),
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.grey[600]!),
+                      ),
+                      focusedBorder: const OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.white),
+                      ),
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-
-          const Divider(),
-
-          // 地点リスト
+          Container(
+            color: Colors.black,
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _routeNameController,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      labelText: 'ルート名',
+                      labelStyle: TextStyle(color: Colors.grey[300]),
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.grey[600]!),
+                      ),
+                      focusedBorder: const OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.white),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 132,
+                  child: Column(
+                    children: [
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          icon: const Icon(Icons.save),
+                          label: const Text('保存'),
+                          onPressed: _isSaving ? null : _saveRoute,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          icon: const Icon(Icons.format_list_numbered),
+                          label: const Text('リナンバー'),
+                          onPressed: _renumberPoints,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          _buildHeaderRow(),
           Expanded(
             child: _points.isEmpty
                 ? const Center(
                     child: Text(
-                      '地点を追加してください',
-                      style: TextStyle(fontSize: 16, color: Colors.grey),
+                      '現在位置追加 または 自動登録開始で地点を作成してください',
+                      style: TextStyle(color: Colors.white70, fontSize: 18),
                     ),
                   )
                 : ListView.builder(
                     itemCount: _points.length,
-                    itemBuilder: (context, index) {
-                      final point = _points[index];
-                      return Card(
-                        margin: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 4,
-                        ),
-                        child: ListTile(
-                          leading: CircleAvatar(
-                            child: Text('${point.no}'),
-                          ),
-                          title: Text(point.message),
-                          subtitle: Text(
-                            '緯度: ${point.latitude.toStringAsFixed(5)}\n'
-                            '経度: ${point.longitude.toStringAsFixed(5)}',
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                icon: const Icon(Icons.arrow_upward, size: 20),
-                                onPressed: index == 0 ? null : () => _movePointUp(index),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.arrow_downward, size: 20),
-                                onPressed: index == _points.length - 1
-                                    ? null
-                                    : () => _movePointDown(index),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.edit, size: 20),
-                                onPressed: () => _editPoint(index),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.delete, size: 20, color: Colors.red),
-                                onPressed: () => _deletePoint(index),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
+                    itemBuilder: (context, index) => _buildPointRow(index),
                   ),
           ),
-
-          // 総距離表示
-          if (_points.length >= 2)
-            Container(
-              padding: const EdgeInsets.all(16.0),
-              color: Colors.grey[200],
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.straighten),
-                  const SizedBox(width: 8),
-                  Text(
-                    '総距離: ${WalkRoute(name: '', points: _points).getTotalDistance().toStringAsFixed(0)}m',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
         ],
       ),
     );
