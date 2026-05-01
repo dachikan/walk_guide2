@@ -47,17 +47,28 @@ class RouteService {
   /// カスタムルート一覧を取得
   static Future<List<RouteInfo>> _getCustomRoutes() async {
     try {
+      print('[RouteService] カスタムルート取得開始');
       final directory = await getApplicationDocumentsDirectory();
+      print('[RouteService] ディレクトリ: ${directory.path}');
+      
       final dirEntity = Directory(directory.path);
+      final exists = await dirEntity.exists();
+      print('[RouteService] ディレクトリ存在: $exists');
       
       final files = await dirEntity
           .list()
           .where((entity) => entity.path.endsWith('.csv'))
           .toList();
       
-      return files.map((file) {
+      print('[RouteService] 見つかったCSVファイル数: ${files.length}');
+      for (var file in files) {
+        print('[RouteService] - ${file.path}');
+      }
+      
+      final routes = files.map((file) {
         final fileName = file.path.split(Platform.pathSeparator).last;
         final routeName = fileName.replaceAll('.csv', '');
+        print('[RouteService] RouteInfo作成: $fileName -> $routeName');
         return RouteInfo(
           fileName: fileName,
           displayName: routeName,
@@ -65,7 +76,12 @@ class RouteService {
           isCustom: true,
         );
       }).toList();
-    } catch (e) {
+      
+      print('[RouteService] カスタムルート数: ${routes.length}');
+      return routes;
+    } catch (e, stackTrace) {
+      print('[RouteService] カスタムルート取得エラー: $e');
+      print('[RouteService] スタックトレース: $stackTrace');
       return [];
     }
   }
@@ -73,19 +89,36 @@ class RouteService {
   /// CSVファイルからルートを読み込む（アセットまたはカスタム）
   static Future<WalkRoute> loadRoute(String fileName, {bool isCustom = false}) async {
     try {
+      print('[RouteService] ルート読み込み開始');
+      print('[RouteService] ファイル名: $fileName');
+      print('[RouteService] カスタム: $isCustom');
+      
       String csvString;
       
       if (isCustom) {
         // カスタムルート（ドキュメントディレクトリから）
         final directory = await getApplicationDocumentsDirectory();
         final file = File('${directory.path}/$fileName');
+        print('[RouteService] カスタムルートパス: ${file.path}');
+        
+        final exists = await file.exists();
+        print('[RouteService] ファイル存在: $exists');
+        
+        if (!exists) {
+          throw Exception('ファイルが見つかりません: ${file.path}');
+        }
+        
         csvString = await file.readAsString();
+        print('[RouteService] ファイル読み込み完了（${csvString.length}文字）');
       } else {
         // アセットルート
+        print('[RouteService] アセットルートパス: assets/routes/$fileName');
         csvString = await rootBundle.loadString('assets/routes/$fileName');
+        print('[RouteService] アセット読み込み完了（${csvString.length}文字）');
       }
       
       final csvData = const CsvToListConverter().convert(csvString);
+      print('[RouteService] CSV解析完了（${csvData.length}行）');
 
       final points = <NaviPoint>[];
       // ヘッダー行をスキップ
@@ -95,8 +128,14 @@ class RouteService {
           points.add(NaviPoint.fromCsv(row));
         }
       }
+      
+      print('[RouteService] 地点数: ${points.length}');
+      for (var point in points) {
+        print('[RouteService] - 地点${point.no}: ${point.message} (${point.latitude}, ${point.longitude})');
+      }
 
       final routeName = fileName.replaceAll('.csv', '');
+      print('[RouteService] ルート作成完了: $routeName');
       return WalkRoute(name: routeName, points: points);
     } catch (e) {
       throw Exception('ルート読み込みエラー: $e');

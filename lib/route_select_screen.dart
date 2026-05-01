@@ -54,7 +54,15 @@ class _RouteSelectScreenState extends State<RouteSelectScreen> {
 
   Future<void> _selectRoute(RouteInfo routeInfo) async {
     try {
+      print('[RouteSelectScreen] ルート選択: ${routeInfo.fileName}');
+      print('[RouteSelectScreen] カスタム: ${routeInfo.isCustom}');
+      
       final route = await RouteService.loadRoute(routeInfo.fileName, isCustom: routeInfo.isCustom);
+      
+      print('[RouteSelectScreen] ルート読み込み成功');
+      print('[RouteSelectScreen] ルート名: ${route.name}');
+      print('[RouteSelectScreen] 地点数: ${route.points.length}');
+      
       await widget.tts.speak('${routeInfo.displayName}を読み込みました。ナビゲーションを開始します。');
 
       if (mounted) {
@@ -68,7 +76,9 @@ class _RouteSelectScreenState extends State<RouteSelectScreen> {
           ),
         );
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      print('[RouteSelectScreen] ルート読み込みエラー: $e');
+      print('[RouteSelectScreen] スタックトレース: $stackTrace');
       _showError('ルートの読み込みに失敗しました: $e');
     }
   }
