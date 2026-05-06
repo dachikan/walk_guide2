@@ -54,6 +54,12 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
   DateTime? _lastSetStateTime; // 最終setState時刻
   static const _minSetStateInterval = Duration(milliseconds: 500); // setState最小間隔
 
+  // 回転検知用
+  double _lastAnnouncedHeading = double.nan; // 最後に案内した時の方位
+  DateTime? _lastRotationAnnounceTime; // 最後に回転案内した時刻
+  static const _rotationThreshold = 30.0; // 回転検知の閾値（度）
+  static const _rotationAnnounceInterval = Duration(seconds: 3); // 最小案内間隔
+
   // 障害者支援機能
   CameraController? _cameraController;
   final SpeechToText _speechToText = SpeechToText();
@@ -287,10 +293,13 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
       // 端末の方位センサーを監視（更新頻度を制限）
       _compassStream = FlutterCompass.events?.listen((CompassEvent event) {
         if (_isDisposed) return;
+        final newHeading = event.heading ?? 0.0;
         // 方位は頻繁に更新されるので_safeSetStateを使用
         _safeSetState(() {
-          _deviceHeading = event.heading ?? 0.0;
+          _deviceHeading = newHeading;
         });
+        // 回転検知：前回案内時から一定角度以上変化したら案内
+        _checkRotationAndAnnounce(newHeading);
       });
       
     } catch (e) {
@@ -332,6 +341,36 @@ class _WalkNaviScreenState extends State<WalkNaviScreen> {
     }
   }
   
+  // 回転検知：閾値以上回転したら方向案内を発声
+  void _checkRotationAndAnnounce(double newHeading) {
+    if (_isDisposed || _isNavigationPaused) return;
+    if (_nextPoint == null || _distanceToNext == null) return;
+
+    // 初回は基準値を設定するだけ
+    if (_lastAnnouncedHeading.isNaN) {
+      _lastAnnouncedHeading = newHeading;
+      return;
+    }
+
+    // 角度差を -180〜180 に正規化
+    double delta = newHeading - _lastAnnouncedHeading;
+    while (delta > 180) delta -= 360;
+    while (delta < -180) delta += 360;
+
+    if (delta.abs() < _rotationThreshold) return;
+
+    // 最小案内間隔チェック
+    final now = DateTime.now();
+    if (_lastRotationAnnounceTime != null &&
+        now.difference(_lastRotationAnnounceTime!) < _rotationAnnounceInterval) {
+      return;
+    }
+
+    _lastAnnouncedHeading = newHeading;
+    _lastRotationAnnounceTime = now;
+    _announceDirection();
+  }
+
   // 音声で方向と距離を案内
   Future<void> _announceDirection() async {
     // ルート案内が一時停止中の場合はスキップ

@@ -95,6 +95,7 @@ class _RouteSelectScreenState extends State<RouteSelectScreen> {
             builder: (context) => RouteEditScreen(
               initialRoute: route,
               isNewRoute: false,
+              originalFileName: routeInfo.fileName,
             ),
           ),
         );

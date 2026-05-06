@@ -103,6 +103,9 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
           markerId: MarkerId('point_${point.no}'),
           position: LatLng(point.latitude, point.longitude),
           onTap: () => _onMarkerTap(i),
+          onDragStart: (_) => _onMarkerDragStart(i),
+          onDragEnd: (pos) => _onMarkerDragEnd(i, pos),
+          draggable: true,
           infoWindow: InfoWindow(
             title: point.message,
             snippet: '地点 ${point.no}${i == 0 ? " (開始)" : i == _editablePoints.length - 1 ? " (終了)" : " (中間)"}',
@@ -205,6 +208,43 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
       _loadPointToEditors(index);
       _rebuildMapObjects();
     });
+  }
+
+  void _onMarkerDragStart(int index) {
+    if (index < 0 || index >= _editablePoints.length) return;
+
+    setState(() {
+      _activePointIndex = index;
+      _midpointFirstIndex = null;
+      _isEditPanelVisible = false;
+      _loadPointToEditors(index);
+      _rebuildMapObjects();
+    });
+  }
+
+  void _onMarkerDragEnd(int index, LatLng position) {
+    if (index < 0 || index >= _editablePoints.length) return;
+
+    final movedPointNo = _editablePoints[index].no;
+
+    setState(() {
+      _editablePoints[index] = _editablePoints[index].copyWith(
+        latitude: position.latitude,
+        longitude: position.longitude,
+      );
+      _activePointIndex = index;
+      _midpointFirstIndex = null;
+      _isEditPanelVisible = false;
+      _loadPointToEditors(index);
+      _rebuildMapObjects();
+      _syncRoutePoints();
+    });
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('地点$movedPointNoを移動しました')),
+      );
+    }
   }
 
   void _onMapTap(LatLng _) {

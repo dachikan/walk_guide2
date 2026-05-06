@@ -4,7 +4,7 @@ import 'models.dart';
 
 /// 全ページ共通のヘッダーウィジェット
 /// タイトル、バージョン、AI切り替え歯車アイコンを表示
-class CommonAppBar extends StatelessWidget implements PreferredSizeWidget {
+class CommonAppBar extends StatefulWidget implements PreferredSizeWidget {
   final String? pageTitle; // ページ固有のタイトル（オプション）
   final VoidCallback? onAIChanged; // AI変更時のコールバック
 
@@ -16,6 +16,30 @@ class CommonAppBar extends StatelessWidget implements PreferredSizeWidget {
 
   @override
   Size get preferredSize => const Size.fromHeight(kToolbarHeight);
+
+  @override
+  State<CommonAppBar> createState() => _CommonAppBarState();
+}
+
+class _CommonAppBarState extends State<CommonAppBar> {
+  String _currentAIName = 'ChatGPT';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCurrentAI();
+  }
+
+  Future<void> _loadCurrentAI() async {
+    final prefs = await SharedPreferences.getInstance();
+    final aiKey = prefs.getString('selected_ai') ?? 'chatgpt';
+    final ai = AIServiceHelper.fromKey(aiKey);
+    if (mounted) {
+      setState(() {
+        _currentAIName = AIServiceHelper.getDisplayName(ai);
+      });
+    }
+  }
 
   Future<void> _showAISelectionDialog(BuildContext context) async {
     final prefs = await SharedPreferences.getInstance();
@@ -83,8 +107,10 @@ class CommonAppBar extends StatelessWidget implements PreferredSizeWidget {
                       AIServiceHelper.toKey(selectedAI),
                     );
                     if (ctx.mounted) Navigator.of(ctx).pop();
+                    // AI名を更新
+                    _loadCurrentAI();
                     // コールバックを呼び出す
-                    onAIChanged?.call();
+                    widget.onAIChanged?.call();
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blue,
@@ -117,15 +143,15 @@ class CommonAppBar extends StatelessWidget implements PreferredSizeWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  pageTitle ?? '歩行ガイドWalk_Guide',
+                  widget.pageTitle ?? '歩行ガイドWalk_Guide',
                   style: const TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                const Text(
-                  'V0.0.20+1',
-                  style: TextStyle(
+                Text(
+                  'V0.0.20+1  AI: $_currentAIName',
+                  style: const TextStyle(
                     fontSize: 10,
                     color: Colors.white70,
                   ),

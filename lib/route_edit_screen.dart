@@ -12,11 +12,13 @@ import 'walking_route.dart';
 class RouteEditScreen extends StatefulWidget {
   final WalkRoute? initialRoute;
   final bool isNewRoute;
+  final String? originalFileName;
 
   const RouteEditScreen({
     Key? key,
     this.initialRoute,
     this.isNewRoute = true,
+    this.originalFileName,
   }) : super(key: key);
 
   @override
@@ -269,7 +271,8 @@ class _RouteEditScreenState extends State<RouteEditScreen> {
   }
 
   String _sanitizeFileName(String name) {
-    return name.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_');
+    // 全角文字はそのまま保持し、ファイル名として使えない記号のみ_に置換
+    return name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
   }
 
   Future<void> _saveRoute() async {
@@ -288,14 +291,19 @@ class _RouteEditScreenState extends State<RouteEditScreen> {
     }
 
     final safeName = _sanitizeFileName(_routeNameController.text.trim());
-    if (safeName.isEmpty) {
+    if (safeName.isEmpty || safeName.replaceAll('_', '').isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('ルート名は英数字で入力してください')),
+        const SnackBar(content: Text('有効なルート名を入力してください')),
       );
       return;
     }
 
-    final fileName = '$safeName.csv';
+    final targetFileName = '$safeName.csv';
+    final originalFileName = widget.originalFileName;
+    final isRenamedExistingRoute =
+        !widget.isNewRoute &&
+        originalFileName != null &&
+        originalFileName != targetFileName;
 
     setState(() {
       _isSaving = true;
@@ -307,7 +315,11 @@ class _RouteEditScreenState extends State<RouteEditScreen> {
         points: _points,
       );
 
-      await RouteService.saveRoute(route, fileName);
+      await RouteService.saveRoute(route, targetFileName);
+
+      if (isRenamedExistingRoute) {
+        await RouteService.deleteRoute(originalFileName);
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

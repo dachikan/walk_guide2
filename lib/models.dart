@@ -5,6 +5,7 @@ enum AIService {
   chatgpt,  // デフォルト
   gemini,
   claude,
+  deepseek,
 }
 
 /// AIサービスのヘルパークラス
@@ -17,6 +18,8 @@ class AIServiceHelper {
         return 'Google Gemini';
       case AIService.claude:
         return 'Claude (Anthropic)';
+      case AIService.deepseek:
+        return 'DeepSeek';
     }
   }
 
@@ -28,6 +31,8 @@ class AIServiceHelper {
         return '高速・無料枠が多い';
       case AIService.claude:
         return '高品質・日本語が得意';
+      case AIService.deepseek:
+        return '高速・低コスト';
     }
   }
 
@@ -45,6 +50,8 @@ class AIServiceHelper {
         return AIService.gemini;
       case 'claude':
         return AIService.claude;
+      case 'deepseek':
+        return AIService.deepseek;
       default:
         return AIService.chatgpt; // デフォルト
     }
